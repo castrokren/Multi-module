@@ -1,0 +1,18 @@
+{
+  "watch_directory": "\\\\research-cifs.nyumc.org\\omero_dev\\kren\\SOM_in",
+  "output_directory": "D:\\SOM_in_labeled",
+  "hardware_keywords_file": "research_instrument_keywords.txt",
+  "software_keywords_file": "software_keywords.txt",
+  "non_instrument_keywords_file": "non_instrument_keywords.txt",
+  "file_extensions": [
+    ".xls",
+    ".xlsx"
+  ],
+  "ignore_temp_files": true,
+  "ignore_labeled_files": true,
+  "service_name": "MonitorFolderSvc",
+  "service_display_name": "Excel Folder Monitor Service",
+  "service_description": "Monitors a folder and processes Excel files when added or changed.",
+  "log_level": "INFO",
+  "process_timeout": 30
+}

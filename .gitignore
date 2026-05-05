@@ -1,0 +1,65 @@
+# Virtual Environments
+venv/
+env/
+ENV/
+.venv
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs
+*.log
+logs/
+pdf_crawler.log
+
+# Large Data Files
+*.xlsx
+*.xls
+*.csv
+/filtered/
+/PROJECTS/Scraper_full/downloads/
+/PROJECTS/Scraper_full/cached/
+*.pdf
+
+# Temporary files
+*.tmp
+*.temp
+.refresh_probe
+*.lock
+
+# OS
+.DS_Store
+Thumbs.db
+.env.local
+
+# Project specific
+learning_log.json
+monitor_config.json.bak
+*.bak

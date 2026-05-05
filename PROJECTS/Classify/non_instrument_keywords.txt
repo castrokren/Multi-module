@@ -1,0 +1,276 @@
+# Non-Instrument Keywords
+# Based on Excel classification analysis
+# Consumables, accessories, parts, services, and other non-instrument items
+
+# Kits & Reagents
+kit
+reagent
+reagent kit
+assay kit
+test kit
+detection kit
+extraction kit
+purification kit
+buffer
+
+# Lab Consumables - Tubes & Containers
+tube
+vial
+bottle
+flask
+beaker
+cartridge
+cassette
+container
+box
+canister
+
+# Lab Consumables - Tips & Plates
+tip
+tips
+pipette tip
+plate
+well plate
+microplate
+96-well
+384-well
+petri dish
+culture dish
+
+# Filters & Membranes
+filter
+membrane
+syringe filter
+cartridge filter
+filter paper
+filtration
+
+# Cables & Connectors
+cable
+cord
+wire
+connector
+adapter
+plug
+socket
+port
+interface cable
+power cord
+ethernet cable
+usb cable
+
+# Power Accessories
+power supply
+battery
+charger
+transformer
+ups
+uninterruptible power supply
+power cord
+power cable
+ac adapter
+
+# Mounting & Support Hardware
+rack
+stand
+mount
+holder
+bracket
+frame
+base
+support
+clamp
+clip
+tray
+
+# Furniture & Fixed Equipment
+furniture
+bench
+cabinet
+desk
+table
+chair
+shelf
+shelving
+storage
+workstation
+hood
+fume hood stand
+
+# Office Furniture & Equipment
+steelcase
+herman miller
+knoll
+haworth
+humanscale
+worksurface
+tackboard
+end panel
+desk legs
+ufb bracket
+light shelf
+led
+locks
+
+# Labels & Documentation
+label
+sticker
+tag
+marker
+documentation
+manual
+guide
+
+# Glassware
+glassware
+glass
+slide
+coverslip
+cuvette
+burette
+pipette
+graduated cylinder
+
+# Service & Support
+service
+installation
+training
+calibration
+validation
+qualification
+warranty
+extended warranty
+repair
+maintenance contract
+preventive maintenance
+pm
+
+# Shipping & Handling
+shipping
+delivery
+freight
+handling
+uncrating
+rigging
+installation service
+setup
+
+# Parts & Accessories
+part
+parts
+accessory
+accessories
+component
+spare part
+replacement part
+consumable
+consumables
+supplies
+
+# Disposables
+disposable
+single-use
+single use
+sterile
+pre-sterilized
+
+# Storage & Organization
+storage box
+organizer
+divider
+separator
+container
+
+# Safety Equipment (non-instrument)
+gloves
+lab coat
+safety glasses
+goggles
+face shield
+apron
+respirator
+
+# Cleaning & Maintenance Supplies
+cleaning
+cleaner
+detergent
+disinfectant
+wipes
+cleaning kit
+maintenance kit
+
+# Tubing & Fittings
+tubing
+hose
+fitting
+coupling
+valve
+stopcock
+
+# Seals & O-rings
+seal
+o-ring
+gasket
+septum
+
+# Blades & Cutting Tools
+blade
+knife
+scalpel
+cutter
+
+# Sample Preparation
+sample prep
+sample preparation
+prep kit
+
+# Environmental Consumables
+co2 sensor
+humidity sensor
+temperature probe
+probe
+
+# Printer Supplies
+toner
+ink
+ribbon
+paper
+
+# Mounting Media & Solutions
+mounting medium
+embedding medium
+solution
+fixative
+stain
+dye
+
+# Adhesives & Sealants
+adhesive
+glue
+sealant
+tape
+parafilm
+
+# Weights & Standards
+weight
+standard
+calibration standard
+reference material
+control
+
+# Miscellaneous Hardware
+screw
+bolt
+nut
+washer
+fastener
+tool
+wrench
+screwdriver
+
+# Warranty & Service Plans (non-software)
+service plan
+service contract
+service agreement
+annual service
+
