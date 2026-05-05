@@ -1,0 +1,7 @@
+{
+  "watch_directory": "Y:/",
+  "output_directory": "D:/SOM_in_labeled",
+  "hardware_keywords_file": "hardware_keywords.txt",
+  "software_keywords_file": "software_keywords.txt",
+  "non_instrument_keywords_file": "non_instrument_keywords.txt"
+}

@@ -1,0 +1,263 @@
+# Software Keywords
+# Based on Excel classification analysis
+# Software, licenses, subscriptions, and digital services
+
+# General Software Terms
+software
+application
+program
+app
+license
+licence
+subscription
+activation
+key
+support
+maintenance
+upgrade
+perpetual
+seat
+renewal
+annual
+
+# Scientific Software
+matlab
+labview
+flowjo
+graphpad
+prism
+imagej
+zen
+nis-elements
+nis elements
+spss
+sas
+r
+python
+labchart
+patchmaster
+neurolucida
+imaris
+metamorph
+volocity
+softmax
+gen5
+
+# Adobe Suite
+adobe
+photoshop
+illustrator
+acrobat
+premiere
+after effects
+creative cloud
+creative suite
+
+# Microsoft Products
+office
+microsoft office
+excel
+word
+powerpoint
+outlook
+access
+project
+visio
+sharepoint
+teams
+skype
+windows
+server
+sql server
+
+# CAD & Design
+autocad
+solidworks
+inventor
+fusion
+revit
+sketchup
+
+# Development Tools
+visual studio
+eclipse
+intellij
+netbeans
+git
+github
+bitbucket
+jenkins
+
+# Virtualization
+docker
+kubernetes
+vmware
+virtualbox
+hyper-v
+
+# Operating Systems
+linux
+unix
+macos
+android
+ios
+
+# Browsers
+chrome
+firefox
+safari
+edge
+internet explorer
+
+# Databases
+oracle
+mysql
+postgresql
+mongodb
+redis
+elasticsearch
+
+# Analytics & BI
+tableau
+power bi
+qlik
+crystal reports
+ssrs
+ssis
+ssas
+kibana
+grafana
+prometheus
+splunk
+
+# Cloud Services
+azure
+aws
+google cloud
+cloud
+saas
+paas
+iaas
+
+# Enterprise Software
+salesforce
+dynamics
+sap
+oracle erp
+peoplesoft
+workday
+servicenow
+jira
+confluence
+
+# Communication
+slack
+zoom
+webex
+gotomeeting
+email
+sms
+
+# File Storage & Sharing
+dropbox
+onedrive
+google drive
+box
+sharefile
+
+# Remote Access
+citrix
+vmware horizon
+remote desktop
+vpn
+
+# Security
+firewall
+antivirus
+malware
+security
+encryption
+backup
+recovery
+disaster recovery
+
+# API & Integration
+rest api
+api
+sdk
+library
+framework
+plugin
+extension
+add-on
+module
+package
+suite
+middleware
+soap
+json
+xml
+webhook
+
+# Monitoring & Logging
+monitoring
+logging
+alerting
+notification
+
+# Development Processes
+automation
+workflow
+ci/cd
+continuous integration
+continuous deployment
+devops
+agile
+scrum
+version control
+
+# File Formats (when specifically about software)
+csv
+pdf
+docx
+xlsx
+pptx
+yaml
+toml
+
+# Compliance & Standards
+gdpr
+hipaa
+sox
+pci dss
+iso
+itil
+cobit
+compliance
+audit
+
+# Performance Metrics
+sla
+service level agreement
+mtbf
+mttr
+rto
+rpo
+performance
+scalability
+reliability
+availability
+uptime
+
+# Software Lifecycle
+training
+documentation
+deployment
+release
+patch
+hotfix
+bug fix
+feature
+enhancement
+improvement
+optimization

@@ -1,0 +1,14 @@
+This readme is to describe the two python applications in this directory
+ - classify_and_clean_dynamic.py
+	- cleans up the excel sheets from PS financials and tags them with "instrument, software and non-instrument"
+
+ - monitor_folder_2.py
+	- Keeps an active watcher over the SOM Cap directory, where the PS financials sheets get written to daily.
+	- Runs the classify_and_clean_dynamic.py on each new sheet. 
+
+- monitor_folder_ui.py
+	- Tool to install python monitoring code as a Windows service. A gui instead of a command line. 
+		- service script- service_script.py
+		- claissification script- classify_.....
+		- Watch directory - SOM Cap
+		- Install to see it in services.msc user needs to have “Log on as a service” enabled under (secpol.msc → Security Settings → Local Policies → User Rights Assignment → Log on as a service.)

@@ -1,0 +1,30 @@
+This script implements a desktop GUI application for batch-crawling supplier websites (from an Excel list) and automatically downloading any PDF files it finds. Here’s how it works:&#x20;
+
+1. **User Interface**
+
+   * Built with Tkinter, the window lets you select two Excel files:
+
+     * **Input Excel**: contains rows with a “TYPE” column (e.g., “Instrument”) and a “Supplier Name.”
+     * **Master List Excel**: maps each “Supplier Name” to its “Website.”
+   * Buttons allow you to browse for those files, start or stop the crawl, and open the local PDF output folder.
+   * A scrolling text area logs status messages as the crawl proceeds.&#x20;
+
+2. **Data Preparation**
+
+   * When you click **Run Scraping**, it reads both spreadsheets with pandas.
+   * It filters the input rows to only those where `TYPE == "Instrument"`, then merges on “Supplier Name” to attach each site URL from the master list.
+   * Any suppliers missing a website are logged as warnings before the crawl begins.&#x20;
+
+3. **Asynchronous Crawling & Downloading**
+
+   * Uses Playwright (Chromium in headless mode) plus BeautifulSoup to fetch and parse each supplier URL.
+   * Recursively follows links on the same domain, looking for `<a href="…">` tags that end in “.pdf.”
+   * A semaphore limits to `MAX_CONCURRENT = 4` concurrent crawls.
+   * Found PDFs are downloaded (via `requests`) into a local `pdfs/` folder, but only if the filename contains one of the keywords (`pdf`, `manual`, `guide`).
+   * Each successful download and any errors or skips are logged in real time.&#x20;
+
+4. **Control Flow & Threading**
+
+   * The actual crawling runs in a background thread so the GUI remains responsive.
+   * You can click **Stop Scraping** to set a flag that gracefully halts new downloads and crawls.
+   * When the crawl finishes (or is stopped), the UI buttons are re-enabled accordingly.&#x20;

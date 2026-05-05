@@ -1,0 +1,220 @@
+# Research Instrument Keywords
+# Based on Excel classification analysis
+# Instruments used for scientific measurement, analysis, and testing
+
+# Microscopy
+microscope
+microtome
+confocal microscope
+fluorescence microscope
+phase contrast microscope
+differential interference contrast
+dic
+sem
+scanning electron microscope
+tem
+transmission electron microscope
+afm
+atomic force microscope
+stm
+scanning tunneling microscope
+imager
+imaging
+
+# Spectrometry & Spectroscopy
+spectrometer
+mass spectrometer
+mass spec
+gc-ms
+lc-ms
+atomic absorption
+aas
+atomic emission
+icp-aes
+icp-ms
+inductively coupled plasma
+icp
+nmr
+nuclear magnetic resonance
+xrf
+x-ray fluorescence
+x-ray diffractometer
+xrd
+eds
+energy dispersive spectroscopy
+
+# Chromatography
+chromatograph
+hplc
+gc
+liquid chromatograph
+lc
+gas chromatograph
+ion chromatograph
+ic
+
+# PCR & Sequencing
+pcr
+qpcr
+thermocycler
+thermal cycler
+real-time pcr
+sequencer
+
+# Centrifugation
+centrifuge
+ultracentrifuge
+rotor
+centrifuge rotor
+
+# Incubation & Temperature Control
+incubator
+co2 incubator
+co2
+shaker incubator
+freezer
+ult
+-80
+-20
+-70
+water bath
+oil bath
+sand bath
+heating mantle
+
+# Flow Cytometry
+flowcytometer
+flow cytometer
+cytometer
+cell sorter
+flow sorter
+cell counter
+
+# Plate Readers & Detection
+plate reader
+microplate reader
+elisa reader
+luminometer
+fluorometer
+spectrofluorometer
+
+# Autoclaves & Sterilization
+autoclave
+
+# Sonication
+sonicator
+
+# Electrophoresis
+electrophoresis
+gel electrophoresis
+transilluminator
+
+# Bioreactors
+bioreactor
+
+# Analyzers (General)
+analyzer
+image analyzer
+particle counter
+toc analyzer
+
+# Balances & Scales
+balance
+scales
+
+# Meters & Measurement
+ph meter
+conductivity meter
+turbidity meter
+dissolved oxygen meter
+dissolved oxygen
+do meter
+flow meter
+pressure gauge
+lux meter
+sound level meter
+decibel meter
+vibration meter
+torque meter
+tachometer
+
+# Calorimetry & Thermal
+calorimeter
+calorimetry
+pyrometer
+thermocouple
+thermistor
+rtd
+resistance temperature detector
+
+# Mechanical Testing
+tensiometer
+viscometer
+rheometer
+strain gauge
+load cell
+accelerometer
+
+# Optical Instruments
+refractometer
+polarimeter
+ellipsometer
+interferometer
+reflectometer
+colorimeter
+densitometer
+nephelometer
+turbidimeter
+
+# Electrochemistry
+potentiometer
+electrometer
+galvanometer
+oscilloscope
+multimeter
+ammeter
+voltmeter
+ohmmeter
+
+# Separation & Purification
+magnetic separator
+lyophilizer
+freeze dryer
+spray dryer
+rotary evaporator
+rotavap
+distillation
+distiller
+
+# Environmental Chambers
+biosafety
+laminar flow hood
+fume hood
+clean bench
+glove box
+anaerobic chamber
+cryostat
+
+# Vacuum Systems
+vacuum pump
+vacuum gauge
+vacuum oven
+manometer
+barometer
+
+# Heating & Drying
+furnace
+muffle furnace
+tube furnace
+
+# Pumps & Motors
+pump
+motor
+
+# Other Scientific Instruments
+hygrometer
+anemometer
+thermometer
+thermostat
+controller
+
