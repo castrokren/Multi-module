@@ -8,8 +8,12 @@ import os
 import sys
 import pandas as pd
 
-# Add Cross-reference directory to Python path
-crossref_dir = r"C:\Users\castrk05_adm\AppData\Local\Programs\Python\PROJECTS\Cross-reference"
+# Add Cross-reference directory to Python path.
+# Override with CROSSREF_DIR env var if needed; otherwise resolve relative to this file.
+crossref_dir = os.environ.get(
+    "CROSSREF_DIR",
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Cross-reference"))
+)
 if crossref_dir not in sys.path:
     sys.path.insert(0, crossref_dir)
 

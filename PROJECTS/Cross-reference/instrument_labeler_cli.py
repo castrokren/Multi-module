@@ -11,73 +11,36 @@ import argparse
 from datetime import datetime
 import shutil
 
+from crossref_utils import find_required_columns
+
 class InstrumentLabelerCLI:
     def __init__(self, file_path):
         self.file_path = file_path
         self.df = None
         self.backup_dir = "#backup_logs"
-        
+
         # Create backup directory
         if not os.path.exists(self.backup_dir):
             os.makedirs(self.backup_dir)
-        
+
         self.load_file()
-    
+
     def load_file(self):
         """Load the Excel file."""
         try:
             self.df = pd.read_excel(self.file_path)
             print(f"✅ Loaded {len(self.df)} items from {self.file_path}")
-            
+
             # Find required columns
-            self.cols = self.find_required_columns()
+            self.cols = find_required_columns(self.df)
             if not all(self.cols.values()):
                 missing = [k for k, v in self.cols.items() if not v]
                 print(f"❌ Missing required columns: {missing}")
                 sys.exit(1)
-                
+
         except Exception as e:
             print(f"❌ Error loading file: {e}")
             sys.exit(1)
-    
-    def find_required_columns(self):
-        """Find required columns in the dataframe."""
-        columns = self.df.columns.tolist()
-        
-        # Find TYPE column
-        type_col = None
-        for col in ['TYPE', 'Type', 'Item Type', 'Product Type']:
-            if col in columns:
-                type_col = col
-                break
-        
-        # Find Item Code column
-        code_col = None
-        for col in ['Item Code', 'ItemCode', 'Code', 'ID', 'Item ID', 'Item_ID']:
-            if col in columns:
-                code_col = col
-                break
-        
-        # Find Description column
-        desc_col = None
-        for col in ['Item Description', 'Description', 'ItemDescription', 'Name', 'Title', 'Product Name']:
-            if col in columns:
-                desc_col = col
-                break
-        
-        # Find Supplier column
-        supplier_col = None
-        for col in ['Supplier Name', 'Supplier', 'Vendor', 'Company']:
-            if col in columns:
-                supplier_col = col
-                break
-        
-        return {
-            'type_col': type_col,
-            'code_col': code_col,
-            'desc_col': desc_col,
-            'supplier_col': supplier_col
-        }
     
     def show_stats(self):
         """Show current statistics."""

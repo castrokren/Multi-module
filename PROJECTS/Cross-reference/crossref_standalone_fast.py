@@ -19,6 +19,8 @@ from PyPDF2 import PdfReader
 import pdfplumber
 import pandas as pd
 
+from crossref_utils import normalize_filename, deduplicate_matches
+
 # Global stop flag for process termination
 GLOBAL_STOP_FLAG = False
 
@@ -330,64 +332,17 @@ def calculate_match_score_standalone(keywords, pdf_text, description, threshold=
     except:
         return 0.0
 
-def normalize_filename(filename):
-    """Normalize filename for deduplication by removing version numbers, dates, and common suffixes."""
-    if not filename:
-        return ""
-    
-    # Convert to lowercase and remove extension
-    base = os.path.splitext(filename.lower())[0]
-    
-    # Remove common version/date patterns
-    import re
-    # Remove version numbers like (1), (2), v1, v2, etc.
-    base = re.sub(r'[_\-\s]*\([0-9]+\)', '', base)
-    base = re.sub(r'[_\-\s]*v[0-9]+', '', base)
-    # Remove year patterns like 2023, 2024, etc.
-    base = re.sub(r'[_\-\s]*20[0-9]{2}', '', base)
-    # Remove common suffixes
-    base = re.sub(r'[_\-\s]*(updated|final|revised|new|latest)$', '', base)
-    # Collapse multiple spaces/underscores/dashes
-    base = re.sub(r'[_\-\s]+', '_', base)
-    # Remove leading/trailing separators
-    base = base.strip('_-. ')
-    
-    return base
-
-def deduplicate_matches(matches):
-    """Remove duplicate matches by normalized filename, keeping the highest score."""
-    if not matches:
-        return matches
-    
-    # Group by normalized filename
-    normalized_groups = {}
-    for match in matches:
-        filename = os.path.basename(match['pdf_path'])
-        normalized = normalize_filename(filename)
-        
-        if normalized not in normalized_groups:
-            normalized_groups[normalized] = []
-        normalized_groups[normalized].append(match)
-    
-    # Keep only the best match from each group
-    deduplicated = []
-    for normalized, group in normalized_groups.items():
-        if len(group) > 1:
-            # Sort by score descending, keep the best
-            best_match = max(group, key=lambda x: x['score'])
-            deduplicated.append(best_match)
-            print(f"    🔄 Deduplicated {len(group)} matches for '{normalized}' -> kept best (score: {best_match['score']:.1f}%)")
-        else:
-            deduplicated.append(group[0])
-    
-    return deduplicated
+    # normalize_filename and deduplicate_matches are imported from crossref_utils at the top of this file.
 
 class PDFSmartFilter:
     """Smart PDF filtering system to prioritize useful PDFs and filter out noise."""
     
     def __init__(self):
+        # Pre-compile all patterns once — avoids re-compilation on every filename check
+        _compile = lambda pats: [re.compile(p, re.IGNORECASE) for p in pats]
+
         # High priority patterns (instruction manuals, guides, etc.)
-        self.high_priority_patterns = [
+        self.high_priority_patterns = _compile([
             r'.*manual.*',
             r'.*instruction.*',
             r'.*guide.*',
@@ -398,22 +353,22 @@ class PDFSmartFilter:
             r'.*installation.*',
             r'.*configuration.*',
             r'.*reference.*',
-            r'.*documentation.*'
-        ]
-        
+            r'.*documentation.*',
+        ])
+
         # Medium priority patterns (specs only, not datasheets)
-        self.medium_priority_patterns = [
+        self.medium_priority_patterns = _compile([
             r'.*specification.*',
             r'.*spec.*sheet.*',
             r'.*technical.*data.*',
-            r'.*product.*info.*'
-        ]
-        
-        # Low priority / noise patterns (should be filtered out or deprioritized)
-        self.noise_patterns = [
+            r'.*product.*info.*',
+        ])
+
+        # Low priority / noise patterns (should be filtered out or deprioritised)
+        self.noise_patterns = _compile([
             r'.*catalog.*drawing.*',
-            r'.*\(catalog.*drawing\).*',  # Matches (CATALOG DRAWING)
-            r'.*catalog.*',  # Catch any catalog files
+            r'.*\(catalog.*drawing\).*',
+            r'.*catalog.*',
             r'.*drawing.*',
             r'.*dwg.*',
             r'.*cad.*',
@@ -426,39 +381,34 @@ class PDFSmartFilter:
             r'.*ad.*sheet.*',
             r'.*marketing.*',
             r'.*sales.*sheet.*',
-            r'carrier\d+.*',  # Matches Carrier21.pdf, Carrier22.pdf, etc.
+            r'carrier\d+.*',
             r'.*part.*list.*',
             r'.*parts.*catalog.*',
             r'.*price.*list.*',
             r'.*order.*form.*',
-            r'.*color.*code.*parts.*list.*',  # Matches diSpim RAMM COLOR CODE PARTS LIST
-            r'.*datasheet.*',  # Move datasheets to noise since they're not useful
-            r'.*self.*assessment.*'  # Filter out self-assessment documents
-        ]
+            r'.*color.*code.*parts.*list.*',
+            r'.*datasheet.*',
+            r'.*self.*assessment.*',
+        ])
     
     def classify_pdf(self, filename):
         """
         Classify PDF by filename and return (category, priority_score)
         Priority: 100=high, 50=medium, 10=low, 0=noise
         """
-        filename_lower = filename.lower()
-        
-        # Check for high priority patterns
+        # Patterns are pre-compiled with IGNORECASE — no need to lowercase filename
         for pattern in self.high_priority_patterns:
-            if re.search(pattern, filename_lower):
+            if pattern.search(filename):
                 return ("high_priority", 100)
-        
-        # Check for medium priority patterns  
+
         for pattern in self.medium_priority_patterns:
-            if re.search(pattern, filename_lower):
+            if pattern.search(filename):
                 return ("medium_priority", 50)
-        
-        # Check for noise patterns
+
         for pattern in self.noise_patterns:
-            if re.search(pattern, filename_lower):
+            if pattern.search(filename):
                 return ("noise", 0)
-        
-        # Default: unknown but not filtered out
+
         return ("unknown", 25)
     
     def filter_and_prioritize_pdfs(self, pdf_files, max_pdfs_per_category=None):
@@ -502,10 +452,15 @@ class PDFSmartFilter:
 
 class CrossReferenceEngine:
     
+    # Maximum number of PDF texts held in the in-process cache.
+    # Each entry is typically 5–20 KB, so 300 entries ≈ 3–6 MB.
+    _PDF_CACHE_MAX = 300
+
     def __init__(self):
         self.results = []
         self.parent_gui_processes = []  # Track child processes for cleanup
         self.pdf_filter = PDFSmartFilter()  # Initialize smart PDF filtering
+        self._pdf_text_cache = {}          # path → extracted text (avoids re-reading same PDF)
         print("CrossReferenceEngine initialized with smart PDF filtering")
     
     def _get_fallback_memory_gb(self):
@@ -2133,7 +2088,25 @@ class CrossReferenceEngine:
             return []
 
     def extract_pdf_text(self, pdf_path, timeout_seconds=30):
-        """Extract text from PDF with timeout protection and error recovery."""
+        """Extract text from a PDF, caching the result for the lifetime of this engine.
+
+        The same PDF may be read by many items that share a supplier directory.
+        Caching avoids redundant disk I/O and library overhead for those repeated lookups.
+        Cache is evicted (oldest-first) when it reaches _PDF_CACHE_MAX entries.
+        """
+        if pdf_path in self._pdf_text_cache:
+            return self._pdf_text_cache[pdf_path]
+
+        text = self._extract_pdf_text_uncached(pdf_path, timeout_seconds)
+
+        # Store result (evict oldest entry when at capacity)
+        if len(self._pdf_text_cache) >= self._PDF_CACHE_MAX:
+            self._pdf_text_cache.pop(next(iter(self._pdf_text_cache)))
+        self._pdf_text_cache[pdf_path] = text
+        return text
+
+    def _extract_pdf_text_uncached(self, pdf_path, timeout_seconds=30):
+        """Internal PDF extraction — use extract_pdf_text() which adds caching."""
         try:
             # Check if file exists and is readable
             if not os.path.exists(pdf_path):
