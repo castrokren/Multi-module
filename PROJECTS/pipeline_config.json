@@ -1,0 +1,47 @@
+{
+  "_comment": "Unified pipeline configuration. Edit paths to match your environment.",
+
+  "paths": {
+    "supplier_excel":  "D:/Masterlist/supplier_list.xlsx",
+    "pdf_dir":         "D:/ScrapedPDFs",
+    "input_excel_dir": "D:/SOM_in",
+    "labeled_dir":     "D:/SOM_in_labeled",
+    "master_excel":    "D:/Masterlist/updated_master_list.xlsx",
+    "results_dir":     "D:/CrossRefResults"
+  },
+
+  "pipeline": {
+    "run_scraper":    true,
+    "run_classify":   true,
+    "run_crossref":   true,
+    "stop_on_failure": false
+  },
+
+  "scraper": {
+    "max_concurrent":           3,
+    "request_delay":            2.0,
+    "page_timeout":             15,
+    "max_pages_per_site":       50,
+    "max_pdf_size_mb":          100,
+    "min_pdf_size_bytes":       512,
+    "strict_content_validation": false,
+    "verbose":                  false,
+    "batch_size":               10
+  },
+
+  "classify": {
+    "learning_mode":         true,
+    "min_occurrences":       5,
+    "confidence_threshold":  0.7,
+    "hw_keywords_file":      "Classify/research_instrument_keywords.txt",
+    "sw_keywords_file":      "Classify/software_keywords.txt",
+    "ni_keywords_file":      "Classify/non_instrument_keywords.txt"
+  },
+
+  "crossref": {
+    "threshold":      60,
+    "test_mode":      false,
+    "low_cpu_mode":   true,
+    "clean_output":   true
+  }
+}
