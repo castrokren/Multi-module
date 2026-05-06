@@ -21,6 +21,8 @@ import shutil
 import threading
 import time
 
+from crossref_utils import find_required_columns
+
 class InstrumentLabelingManager:
     def __init__(self, master):
         self.master = master
@@ -285,43 +287,8 @@ class InstrumentLabelingManager:
             messagebox.showerror("Error", f"Failed to load file:\n{str(e)}")
     
     def find_required_columns(self, df):
-        """Find required columns in the dataframe."""
-        columns = df.columns.tolist()
-        
-        # Find TYPE column
-        type_col = None
-        for col in ['TYPE', 'Type', 'Item Type', 'Product Type']:
-            if col in columns:
-                type_col = col
-                break
-        
-        # Find Item Code column
-        code_col = None
-        for col in ['Item Code', 'ItemCode', 'Code', 'ID', 'Item ID', 'Item_ID']:
-            if col in columns:
-                code_col = col
-                break
-        
-        # Find Description column
-        desc_col = None
-        for col in ['Item Description', 'Description', 'ItemDescription', 'Name', 'Title', 'Product Name']:
-            if col in columns:
-                desc_col = col
-                break
-        
-        # Find Supplier column
-        supplier_col = None
-        for col in ['Supplier Name', 'Supplier', 'Vendor', 'Company']:
-            if col in columns:
-                supplier_col = col
-                break
-        
-        return {
-            'type_col': type_col,
-            'code_col': code_col,
-            'desc_col': desc_col,
-            'supplier_col': supplier_col
-        }
+        """Find required columns in the dataframe (delegates to shared utility)."""
+        return find_required_columns(df)
     
     def update_status(self):
         """Update the status display."""

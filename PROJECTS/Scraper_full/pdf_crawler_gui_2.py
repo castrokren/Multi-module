@@ -51,55 +51,20 @@ def vv_log(message, level="info"):
 
 vv_log("Starting application initialization...")
 
-try:
-    vv_log("Importing pandas...")
-    import pandas as pd
-    vv_log("✅ pandas imported successfully")
-except Exception as e:
-    vv_log(f"❌ pandas import failed: {e}")
-    traceback.print_exc()
-
-try:
-    vv_log("Importing BeautifulSoup...")
-    from bs4 import BeautifulSoup
-    vv_log("✅ BeautifulSoup imported successfully")
-except Exception as e:
-    vv_log(f"❌ BeautifulSoup import failed: {e}")
-    traceback.print_exc()
-
-try:
-    vv_log("Importing PyPDF2...")
-    from PyPDF2 import PdfReader
-    vv_log("✅ PyPDF2 imported successfully")
-except Exception as e:
-    vv_log(f"❌ PyPDF2 import failed: {e}")
-    traceback.print_exc()
-
-try:
-    vv_log("Importing pdfplumber...")
-    import pdfplumber
-    vv_log("✅ pdfplumber imported successfully")
-except Exception as e:
-    vv_log(f"❌ pdfplumber import failed: {e}")
-    traceback.print_exc()
-
-try:
-    vv_log("Importing difflib...")
-    from difflib import SequenceMatcher
-    vv_log("✅ difflib imported successfully")
-except Exception as e:
-    vv_log(f"❌ difflib import failed: {e}")
-    traceback.print_exc()
-
-try:
-    vv_log("Importing datetime...")
-    from datetime import datetime
-    vv_log("✅ datetime imported successfully")
-except Exception as e:
-    vv_log(f"❌ datetime import failed: {e}")
-    traceback.print_exc()
-
 vv_log("All imports completed successfully")
+
+# ---------------------------------------------------------------------------
+# Verify that top-level imports succeeded (log only — no re-import needed)
+# ---------------------------------------------------------------------------
+for _mod_name, _obj in (
+    ("pandas",        pd),
+    ("BeautifulSoup", BeautifulSoup),
+    ("PyPDF2",        PdfReader),
+    ("pdfplumber",    pdfplumber),
+    ("SequenceMatcher", SequenceMatcher),
+    ("datetime",      datetime),
+):
+    vv_log(f"✅ {_mod_name} available")
 
 # Memory monitoring functions
 def monitor_memory():
@@ -1320,29 +1285,45 @@ class PDFCrawlerEnhancedApp:
         vv_log("          ❌ All extraction methods failed")
         return ""
     
-    def _extract_with_pypdf2(self, pdf_path):
-        """Extract text using PyPDF2"""
+    def _extract_with_pypdf2(self, pdf_path, timeout_seconds=30):
+        """Extract text using PyPDF2 with a hard timeout to prevent hangs."""
         vv_log("          Trying PyPDF2...")
-        try:
-            with open(pdf_path, 'rb') as file:
-                reader = PdfReader(file)
-                text = ""
-                for page in reader.pages:
-                    text += page.extract_text() + " "
-            
-            if text.strip():
-                vv_log(f"          ✅ PyPDF2 extracted {len(text)} characters")
-                return text.strip()
+
+        result_holder = [None]
+        error_holder  = [None]
+
+        def _worker():
+            try:
+                with open(pdf_path, 'rb') as file:
+                    reader = PdfReader(file)
+                    text = "".join(
+                        (page.extract_text() or "") + " "
+                        for page in reader.pages
+                    )
+                result_holder[0] = text.strip()
+            except FileNotFoundError:
+                vv_log(f"          ❌ PDF file not found: {pdf_path}", "error")
+            except PermissionError:
+                vv_log(f"          ❌ Permission denied accessing: {pdf_path}", "error")
+            except Exception as e:
+                error_holder[0] = e
+
+        worker = threading.Thread(target=_worker, daemon=True)
+        worker.start()
+        worker.join(timeout=timeout_seconds)
+
+        if worker.is_alive():
+            vv_log(f"          ⚠️ PyPDF2 timed out after {timeout_seconds}s — skipping", "warning")
             return ""
-        except FileNotFoundError:
-            vv_log(f"          ❌ PDF file not found: {pdf_path}", "error")
+
+        if error_holder[0]:
+            vv_log(f"          ❌ PyPDF2 extraction failed: {error_holder[0]}", "error")
             return ""
-        except PermissionError:
-            vv_log(f"          ❌ Permission denied accessing: {pdf_path}", "error")
-            return ""
-        except Exception as e:
-            vv_log(f"          ❌ PyPDF2 extraction failed: {e}", "error")
-            return ""
+
+        text = result_holder[0] or ""
+        if text:
+            vv_log(f"          ✅ PyPDF2 extracted {len(text)} characters")
+        return text
     
     def _extract_with_pdfplumber(self, pdf_path):
         """Extract text using pdfplumber"""
@@ -2286,20 +2267,21 @@ class PDFCrawlerEnhancedApp:
             self.log(f"Processing {len(pairs)} suppliers in batches of {batch_size} with {max_concurrent} concurrent threads", "info")
             
             completed_count = 0
-            
+            _count_lock = threading.Lock()   # protects completed_count across threads
+
             for batch_start in range(0, len(pairs), batch_size):
                 if not self.running:
                     break
-                    
+
                 batch_end = min(batch_start + batch_size, len(pairs))
                 current_batch = pairs[batch_start:batch_end]
-                
+
                 self.log(f"Processing batch {batch_start//batch_size + 1}/{(len(pairs) + batch_size - 1)//batch_size}: suppliers {batch_start + 1}-{batch_end}", "info")
-                
+
                 # Process current batch with semaphore for concurrency control
                 semaphore = threading.Semaphore(max_concurrent)
                 batch_threads = []
-                
+
                 def crawl_vendor(supplier, url):
                     try:
                         semaphore.acquire()
@@ -2309,10 +2291,12 @@ class PDFCrawlerEnhancedApp:
                     finally:
                         semaphore.release()
                         nonlocal completed_count
-                        completed_count += 1
-                        self.progress['value'] = completed_count
-                        self.log(f"Completed {completed_count}/{len(pairs)} suppliers", "info")
-                
+                        with _count_lock:
+                            completed_count += 1
+                            current = completed_count
+                        self.progress['value'] = current
+                        self.log(f"Completed {current}/{len(pairs)} suppliers", "info")
+
                 # Start threads for current batch
                 for supplier, url in current_batch:
                     if not self.running:
@@ -2320,16 +2304,17 @@ class PDFCrawlerEnhancedApp:
                     thread = threading.Thread(target=crawl_vendor, args=(supplier, url), daemon=True)
                     thread.start()
                     batch_threads.append(thread)
-                
+
                 # Wait for current batch to complete with timeout
                 batch_timeout = 300  # 5 minutes per batch
                 for thread in batch_threads:
                     thread.join(timeout=batch_timeout)
                     if thread.is_alive():
                         self.log(f"⚠️ Thread timeout - some suppliers in batch may still be processing", "warning")
-                
+
                 if self.running:
                     self.log(f"Batch {batch_start//batch_size + 1} completed", "info")
+                    gc.collect()   # reclaim memory between batches
             
             if self.running:
                 self.log(f"✅ Crawling completed! Visited {self.page_count} pages, downloaded {self.pdf_count} PDFs.", "success")
