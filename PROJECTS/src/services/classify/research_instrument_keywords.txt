@@ -1,0 +1,243 @@
+-20
+-70
+-80
+10/300
+17.7
+5.83
+aas
+accelerometer
+afm
+ammeter
+anaerobic chamber
+analyzer
+anemometer
+atomic absorption
+atomic emission
+atomic force microscope
+autoclave
+balance
+barometer
+basic
+being
+bioreactor
+biosafety
+blower
+body
+c5-1
+calorimeter
+calorimetry
+cell counter
+cell sorter
+cell-iq™
+centrifuge
+centrifuge rotor
+chemidoc™
+chromatograph
+clean bench
+co2
+co2 incubator
+code
+colorimeter
+conductivity meter
+confocal microscope
+controller
+cryostat
+ctsi
+cytometer
+decibel meter
+densitometer
+dic
+differential interference contrast
+disk
+dissolved oxygen
+dissolved oxygen meter
+distillation
+distiller
+do meter
+door
+dosing
+double
+dxrxi
+eds
+electrometer
+electrophoresis
+elisa reader
+ellipsometer
+energy dispersive spectroscopy
+epiq
+evos
+exi600_lr
+flow cytometer
+flow meter
+flow sorter
+flowcytometer
+fluorescence microscope
+fluorometer
+freeze dryer
+freezer
+fume hood
+furnace
+galvanometer
+gas chromatograph
+gc
+gc-ms
+gel electrophoresis
+gene
+glass
+glove box
+heat
+heating mantle
+high
+hinged
+hose
+hplc
+hygrometer
+ic
+icp
+icp-aes
+icp-ms
+image analyzer
+imager
+imaging
+incubator
+inductively coupled plasma
+interferometer
+ion chromatograph
+item#
+l13-6
+l15-4
+l23119
+l23120
+l28552
+l30257
+laminar flow hood
+laptop
+lc
+lc-ms
+leica
+liquid chromatograph
+load cell
+loop
+luminometer
+lux meter
+lyophilizer
+m3000
+magnetic separator
+manometer
+mantis
+mass spec
+mass spectrometer
+mateo
+microplate reader
+microscope
+microtome
+models
+module
+motor
+mp/chemidoc
+muffle furnace
+multimeter
+nephelometer
+nikon
+nmr
+nuclear magnetic resonance
+octet
+ohmmeter
+oil bath
+optics
+oscilloscope
+particle counter
+pcr
+ph meter
+phase contrast microscope
+phcbi
+plate reader
+plus
+polarimeter
+potentiometer
+power
+pressure gauge
+probe
+promo
+pulser
+pump
+pyrometer
+qpcr
+quote
+raman
+real-time pcr
+rebel
+reflectometer
+refractometer
+rem/hat
+resistance temperature detector
+rheometer
+rotary evaporator
+rotavap
+rotor
+rtd
+sample
+sand bath
+scales
+scanning electron microscope
+scanning tunneling microscope
+sem
+sensor
+sequencer
+series
+shaker
+shaker incubator
+slider
+smart
+sold
+sonicator
+sound level meter
+spectrofluorometer
+spectrometer
+spray dryer
+st80i
+sticky
+stm
+strain gauge
+stress
+system
+t-edge
+tachometer
+tem
+tensiometer
+test
+thermal cycler
+thermistor
+thermo
+thermocouple
+thermocycler
+thermometer
+thermostat
+toc analyzer
+torque meter
+total
+transilluminator
+transmission electron microscope
+tray
+tube furnace
+turbidimeter
+turbidity meter
+ult
+ultra
+ultracentrifuge
+vacuum gauge
+vacuum oven
+vacuum pump
+vendor
+vf-2
+vibration meter
+viscometer
+voltmeter
+water bath
+white
+whole
+x-ray
+x-ray diffractometer
+x-ray fluorescence
+xrd
+xrf

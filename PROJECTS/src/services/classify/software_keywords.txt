@@ -1,0 +1,222 @@
+access
+acrobat
+activation
+add-on
+adobe
+after effects
+agile
+alerting
+android
+annual
+antivirus
+api
+app
+application
+audit
+autocad
+automation
+availability
+aws
+azure
+backup
+bitbucket
+box
+bug fix
+cat#
+chrome
+ci/cd
+citrix
+cloud
+cobit
+compliance
+confluence
+continuous deployment
+continuous integration
+creative cloud
+creative suite
+crystal reports
+csv
+deployment
+devops
+disaster recovery
+docker
+documentation
+docx
+dropbox
+dynamics
+eclipse
+edge
+elasticsearch
+email
+encryption
+enhancement
+excel
+extension
+feature
+firefox
+firewall
+first
+flowjo
+framework
+fusion
+gdpr
+gen5
+git
+github
+google cloud
+google drive
+gotomeeting
+grafana
+graphpad
+halo
+hipaa
+hockey
+hotfix
+hyper-v
+iaas
+illustrator
+imagej
+imaris
+improvement
+intellij
+internet explorer
+inventor
+ios
+iso
+itil
+jenkins
+jira
+json
+key
+keyp
+kibana
+kubernetes
+labchart
+labview
+library
+licence
+license
+linux
+logging
+macos
+maintenance
+malware
+matlab
+metamorph
+microsoft office
+middleware
+module
+mohr
+mongodb
+monitoring
+mtbf
+mttr
+mysql
+netbeans
+neurolucida
+nis elements
+nis-elements
+notification
+office
+onedrive
+optimization
+oracle
+oracle erp
+outlook
+paas
+package
+patch
+patchmaster
+pci dss
+pdf
+peoplesoft
+performance
+perpetual
+photoshop
+plugin
+postgresql
+power bi
+powerpoint
+pptx
+premiere
+prism
+probe
+program
+project
+prometheus
+python
+qlik
+r
+recovery
+redis
+release
+reliability
+remote desktop
+renewal
+rest api
+revit
+rotor
+rpo
+rto
+saas
+safari
+salesforce
+sample
+sap
+sas
+scalability
+scrum
+sdk
+seat
+security
+server
+service level agreement
+servicenow
+sharefile
+sharepoint
+sketchup
+skype
+sla
+slack
+sms
+soap
+softmax
+software
+solidworks
+sox
+splunk
+spss
+sql server
+ssas
+ssis
+ssrs
+stick
+subscription
+suite
+support
+tableau
+teams
+toml
+training
+unix
+upgrade
+uptime
+version control
+virtualbox
+visio
+visual studio
+vmware
+vmware horizon
+volocity
+vpn
+webex
+webhook
+windows
+word
+workday
+workflow
+xlsx
+xml
+yaml
+zen
+zoom
