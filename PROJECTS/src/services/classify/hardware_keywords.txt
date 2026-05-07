@@ -1,0 +1,213 @@
+# NOTE: This file has been superseded by the THREE-CATEGORY SYSTEM
+# Please use the new keyword files for better accuracy:
+#   - research_instrument_keywords.txt (for scientific instruments)
+#   - software_keywords.txt (for software and licenses)
+#   - non_instrument_keywords.txt (for consumables, parts, services)
+# See THREE_CATEGORY_SYSTEM_README.md for details
+#
+# This file is kept for backward compatibility with older scripts only.
+#
+instrument
+equipment
+device
+hardware
+machine
+tool
+apparatus
+gadget
+component
+sensor
+detector
+analyzer
+microscope
+spectrometer
+chromatograph
+balance
+centrifuge
+incubator
+autoclave
+# freezers and refrigerators are storage equipment, not instruments
+# freezer
+# refrigerator
+camera
+scanner
+# printer (printer accessories like carts/mounts are not instruments)
+# monitor (computer monitors are not measuring instruments)
+computer
+server
+workstation
+laptop
+tablet
+phone
+scanner
+barcode
+rfid
+scales
+thermometer
+ph meter
+conductivity meter
+turbidity meter
+dissolved oxygen meter
+flow meter
+pressure gauge
+thermostat
+controller
+pump
+motor
+generator
+transformer
+cable
+wire
+connector
+adapter
+charger
+battery
+power supply
+switch
+relay
+fuse
+circuit breaker
+# Additional specific instrument keywords
+calorimeter
+calorimetry
+viscometer
+rheometer
+tensiometer
+potentiometer
+electrometer
+galvanometer
+oscilloscope
+multimeter
+ammeter
+voltmeter
+ohmmeter
+mass spectrometer
+nuclear magnetic resonance
+nmr
+x-ray diffractometer
+xrd
+atomic absorption
+aas
+flame photometer
+colorimeter
+densitometer
+reflectometer
+ellipsometer
+interferometer
+refractometer
+polarimeter
+rotary evaporator
+rotavap
+vacuum pump
+vacuum gauge
+manometer
+barometer
+hygrometer
+anemometer
+lux meter
+sound level meter
+decibel meter
+vibration meter
+accelerometer
+strain gauge
+load cell
+torque meter
+tachometer
+pyrometer
+thermocouple
+thermistor
+rtd
+resistance temperature detector
+flow cytometer
+cell counter
+particle counter
+gas chromatograph
+gc
+liquid chromatograph
+lc
+hplc
+gel electrophoresis
+pcr
+thermal cycler
+real-time pcr
+qpcr
+plate reader
+microplate reader
+elisa reader
+luminometer
+fluorometer
+spectrofluorometer
+nephelometer
+turbidimeter
+dissolved oxygen
+do meter
+cod
+bod
+toc analyzer
+ion chromatograph
+ic
+icp
+inductively coupled plasma
+atomic emission
+icp-aes
+icp-ms
+mass spec
+gc-ms
+lc-ms
+xrf
+x-ray fluorescence
+eds
+energy dispersive spectroscopy
+sem
+scanning electron microscope
+tem
+transmission electron microscope
+afm
+atomic force microscope
+stm
+scanning tunneling microscope
+confocal microscope
+fluorescence microscope
+phase contrast microscope
+differential interference contrast
+dic
+image analyzer
+image analysis
+cell sorter
+flow sorter
+magnetic separator
+centrifuge rotor
+ultracentrifuge
+rotor
+biosafety cabinet
+laminar flow hood
+fume hood
+clean bench
+glove box
+anaerobic chamber
+co2 incubator
+shaker incubator
+orbital shaker
+magnetic stirrer
+hot plate
+water bath
+oil bath
+sand bath
+heating mantle
+furnace
+muffle furnace
+tube furnace
+vacuum oven
+lyophilizer
+freeze dryer
+spray dryer
+fluidized bed dryer
+rotary dryer
+evaporator
+distillation
+distiller
+water still
+deionizer
+ultrapure water
+milli-q
+purification system
