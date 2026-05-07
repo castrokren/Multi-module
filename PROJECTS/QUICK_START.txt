@@ -1,0 +1,164 @@
+================================================================================
+                    CRAWLER PROJECTS - TEST QUICK START
+================================================================================
+
+INSTALLATION
+============
+1. Navigate to project root:
+   cd C:\Projects\Crawler\PROJECTS
+
+2. Install test dependencies:
+   pip install -r requirements-test.txt
+
+3. Verify installation:
+   pytest --version
+
+
+RUNNING TESTS
+=============
+
+OPTION 1: Using Windows Batch Script (Recommended)
+   RUN_TESTS.bat                  # Run all tests
+   RUN_TESTS.bat scraper          # Run scraper-full tests only
+   RUN_TESTS.bat classify         # Run classify tests only
+   RUN_TESTS.bat crossref         # Run cross-reference tests only
+   RUN_TESTS.bat coverage         # Run with coverage report
+   RUN_TESTS.bat help             # Show help
+
+OPTION 2: Using pytest directly
+   pytest                         # Run all tests
+   pytest -v                      # Verbose output
+   pytest --cov=src/services      # With coverage
+
+OPTION 3: By service
+   pytest src/services/scraper-full/tests/unit/ -v
+   pytest src/services/classify/tests/unit/ -v
+   pytest src/services/cross-reference/tests/unit/ -v
+
+OPTION 4: Specific test file
+   pytest src/services/scraper-full/tests/unit/test_scraper_validation.py -v
+
+OPTION 5: Specific test class
+   pytest src/services/scraper-full/tests/unit/test_scraper_validation.py::TestValidateUrl -v
+
+OPTION 6: Specific test function
+   pytest src/services/scraper-full/tests/unit/test_scraper_validation.py::TestValidateUrl::test_valid_https_url -v
+
+
+TEST STATISTICS
+===============
+Total Test Files:        7
+Total Test Functions:    88
+Total Test Classes:      15
+
+By Service:
+  - scraper-full:        3 files, 25 tests
+  - classify:            2 files, 30 tests
+  - cross-reference:     2 files, 33 tests
+
+
+DOCUMENTATION
+==============
+- TESTING_SETUP.md              Full testing guide with all details
+- TEST_INFRASTRUCTURE_SUMMARY.md Complete setup summary and verification
+- QUICK_START.txt               This file
+
+
+KEY FILES
+==========
+Configuration:
+  - pytest.ini                   Pytest configuration
+  - requirements-test.txt        Testing dependencies
+  - RUN_TESTS.bat                Test execution script
+
+Shared Fixtures:
+  - tests/conftest.py            Root-level fixtures (30+ fixtures)
+
+Service Test Files:
+  scraper-full/tests/unit/
+    - conftest.py                Service-specific fixtures
+    - test_scraper_validation.py (7 tests)
+    - test_scraper_initialization.py (10 tests)
+    - test_scraper_supplier_loading.py (8 tests)
+
+  classify/tests/unit/
+    - conftest.py                Service-specific fixtures
+    - test_adaptive_processor_keywords.py (16 tests)
+    - test_adaptive_processor_file_handling.py (14 tests)
+
+  cross-reference/tests/unit/
+    - conftest.py                Service-specific fixtures
+    - test_crossref_utils.py     (18 tests)
+    - test_crossref_matching.py  (15 tests)
+
+
+COVERAGE
+========
+Generate coverage report:
+  pytest --cov=src/services --cov-report=html
+
+View coverage:
+  Open htmlcov/index.html in browser
+
+
+TROUBLESHOOTING
+===============
+Q: pytest command not found
+A: Make sure requirements-test.txt is installed: pip install -r requirements-test.txt
+
+Q: Import errors when running tests
+A: Verify conftest.py files are in correct locations and __init__.py files exist
+
+Q: Tests fail with "fixture not found"
+A: Check fixture name spelling and that conftest.py is in correct directory
+
+Q: Windows batch file not executing
+A: Try running with: python -m pytest instead of RUN_TESTS.bat
+
+
+COMMON COMMANDS
+===============
+# Run all tests with output
+pytest -v
+
+# Run tests for one service with coverage
+pytest src/services/scraper-full/tests/unit/ --cov=src/services/scraper-full --cov-report=term-missing
+
+# Run tests and show which passed/failed
+pytest -v --tb=short
+
+# Run tests in parallel (faster)
+pytest -n auto
+
+# Run tests matching a pattern
+pytest -k "validation" -v
+
+
+NEXT STEPS
+==========
+1. Run: pytest -v
+   (All 88 tests should pass)
+
+2. Review test code:
+   Open test files in src/services/*/tests/unit/test_*.py
+
+3. Check coverage:
+   pytest --cov=src/services --cov-report=html
+   Open htmlcov/index.html
+
+4. Integrate with CI/CD:
+   See TESTING_SETUP.md section "CI/CD Integration"
+
+5. Add more tests:
+   See TESTING_SETUP.md section "Adding New Tests"
+
+
+IMPORTANT NOTES
+===============
+- All tests are unit tests (no external dependencies)
+- Tests use fixtures for setup/teardown
+- Temporary files are auto-cleaned
+- No modifications to production code required
+- Ready for CI/CD integration
+
+For complete documentation, see TESTING_SETUP.md
