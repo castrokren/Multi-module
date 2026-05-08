@@ -7,14 +7,25 @@
     "input_excel_dir": "data/som-in",
     "labeled_dir":     "data/som-in-labeled",
     "master_excel":    "data/masterlist/updated_master_list.xlsx",
+    "master_list":     "data/masterlist/updated_master_list.xlsx",
     "results_dir":     "src/services/cross-reference/results"
   },
 
   "pipeline": {
-    "run_scraper":    true,
-    "run_classify":   true,
-    "run_crossref":   true,
+    "run_scraper":              true,
+    "run_classify":             true,
+    "run_supplier_resolution":  true,
+    "run_crossref":             true,
     "stop_on_failure": false
+  },
+
+  "supplier_resolution": {
+    "enabled":                  true,
+    "confidence_threshold":     70,
+    "search_delay_seconds":     1.5,
+    "search_timeout_seconds":   10,
+    "pending_list_path":        "data/supplier-pending/new_suppliers_pending.xlsx",
+    "resolved_list_path":       "data/supplier-pending/resolved_suppliers.xlsx"
   },
 
   "scraper": {

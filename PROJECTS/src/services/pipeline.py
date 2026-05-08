@@ -4,9 +4,10 @@ Pipeline Orchestrator
 =====================
 Runs the three modules in sequence:
 
-    Stage 1 — Scraper   : crawl supplier websites, download PDFs
-    Stage 2 — Classify  : classify Excel items (Instrument / Software / Non-Instrument)
-    Stage 3 — Cross-ref : link classified records to downloaded PDFs
+    Stage 1 — Scraper              : crawl supplier websites, download PDFs
+    Stage 2 — Classify             : classify Excel items (Instrument / Software / Non-Instrument)
+    Stage 2b — Supplier Resolution : resolve unknown suppliers via web search
+    Stage 3 — Cross-ref            : link classified records to downloaded PDFs
 
 Configuration is read from ``pipeline_config.json`` in the same directory.
 Individual stages can be enabled / disabled in the ``pipeline`` section of
@@ -88,7 +89,8 @@ def _normalized_config(cfg: dict) -> dict:
     """Copy config and normalize all known path fields to absolute paths."""
     normalized = dict(cfg)
     paths = dict(cfg.get("paths", {}))
-    for key in ("supplier_excel", "pdf_dir", "input_excel_dir", "labeled_dir", "master_excel", "results_dir"):
+    for key in ("supplier_excel", "pdf_dir", "input_excel_dir", "labeled_dir",
+                "master_excel", "master_list", "results_dir"):
         paths[key] = _resolve_path(paths.get(key, ""))
     normalized["paths"] = paths
 
@@ -253,6 +255,53 @@ def run_classify(cfg: dict) -> bool:
     return count > 0 or True   # don't fail the pipeline if dir was empty
 
 
+def run_supplier_resolution(cfg: dict) -> bool:
+    """Stage 2b: resolve unknown suppliers via web search."""
+    logger.info("=" * 60)
+    logger.info("STAGE 2b — SUPPLIER RESOLUTION")
+    logger.info("=" * 60)
+
+    paths = cfg.get("paths", {})
+    res_cfg = cfg.get("supplier_resolution", {})
+
+    # Build the cfg dict the resolver expects
+    resolver_cfg = {
+        "master_list":          paths.get("master_list") or paths.get("master_excel", ""),
+        "classified_excel":     paths.get("labeled_dir", ""),
+        "supplier_resolution":  res_cfg,
+    }
+
+    # classified_excel should be the most-recently-labeled file, same logic as crossref
+    labeled_path = Path(paths.get("labeled_dir", ""))
+    if labeled_path.exists():
+        excel_files = sorted(
+            list(labeled_path.glob("*_labeled.xlsx")) or list(labeled_path.glob("*.xlsx")),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        if excel_files:
+            resolver_cfg["classified_excel"] = str(excel_files[0])
+
+    logger.info("Master list      : %s", resolver_cfg["master_list"])
+    logger.info("Classified Excel : %s", resolver_cfg["classified_excel"])
+
+    try:
+        resolve_suppliers = _import_from_file(
+            "supplier_resolver",
+            SERVICES_ROOT / "supplier-resolution" / "supplier_resolver.py",
+            "resolve_suppliers",
+        )
+    except ImportError as exc:
+        logger.error("Cannot import resolve_suppliers: %s", exc)
+        return False
+
+    t0 = time.time()
+    success = resolve_suppliers(resolver_cfg)
+    elapsed = time.time() - t0
+    logger.info("Supplier resolution finished in %.0f s — success=%s", elapsed, success)
+    return success
+
+
 def run_crossref(cfg: dict) -> bool:
     """Stage 3: link classified records to downloaded PDFs."""
     logger.info("=" * 60)
@@ -343,12 +392,14 @@ def main():
         "--config", default=str(SERVICES_ROOT / "pipeline_config.json"),
         help="Path to pipeline_config.json",
     )
-    parser.add_argument("--skip-scraper",  action="store_true", help="Skip Stage 1 (Scraper)")
-    parser.add_argument("--skip-classify", action="store_true", help="Skip Stage 2 (Classify)")
-    parser.add_argument("--skip-crossref", action="store_true", help="Skip Stage 3 (Cross-ref)")
-    parser.add_argument("--only-scraper",  action="store_true", help="Run Stage 1 only")
-    parser.add_argument("--only-classify", action="store_true", help="Run Stage 2 only")
-    parser.add_argument("--only-crossref", action="store_true", help="Run Stage 3 only")
+    parser.add_argument("--skip-scraper",              action="store_true", help="Skip Stage 1 (Scraper)")
+    parser.add_argument("--skip-classify",             action="store_true", help="Skip Stage 2 (Classify)")
+    parser.add_argument("--skip-supplier-resolution",  action="store_true", help="Skip Stage 2b (Supplier Resolution)")
+    parser.add_argument("--skip-crossref",             action="store_true", help="Skip Stage 3 (Cross-ref)")
+    parser.add_argument("--only-scraper",              action="store_true", help="Run Stage 1 only")
+    parser.add_argument("--only-classify",             action="store_true", help="Run Stage 2 only")
+    parser.add_argument("--only-supplier-resolution",  action="store_true", help="Run Stage 2b only")
+    parser.add_argument("--only-crossref",             action="store_true", help="Run Stage 3 only")
     parser.add_argument("--dry-run", action="store_true", help="Validate config and paths, then exit")
     args = parser.parse_args()
 
@@ -357,22 +408,26 @@ def main():
     # Resolve which stages to run
     pipe = cfg.get("pipeline", {})
     stages = {
-        "scraper":  pipe.get("run_scraper",  True),
-        "classify": pipe.get("run_classify", True),
-        "crossref": pipe.get("run_crossref", True),
+        "scraper":              pipe.get("run_scraper",              True),
+        "classify":             pipe.get("run_classify",             True),
+        "supplier_resolution":  pipe.get("run_supplier_resolution",  True),
+        "crossref":             pipe.get("run_crossref",             True),
     }
 
     # CLI overrides
     if args.only_scraper:
-        stages = {"scraper": True,  "classify": False, "crossref": False}
+        stages = {"scraper": True,  "classify": False, "supplier_resolution": False, "crossref": False}
     elif args.only_classify:
-        stages = {"scraper": False, "classify": True,  "crossref": False}
+        stages = {"scraper": False, "classify": True,  "supplier_resolution": False, "crossref": False}
+    elif args.only_supplier_resolution:
+        stages = {"scraper": False, "classify": False, "supplier_resolution": True,  "crossref": False}
     elif args.only_crossref:
-        stages = {"scraper": False, "classify": False, "crossref": True}
+        stages = {"scraper": False, "classify": False, "supplier_resolution": False, "crossref": True}
     else:
-        if args.skip_scraper:  stages["scraper"]  = False
-        if args.skip_classify: stages["classify"] = False
-        if args.skip_crossref: stages["crossref"] = False
+        if args.skip_scraper:             stages["scraper"]             = False
+        if args.skip_classify:            stages["classify"]            = False
+        if args.skip_supplier_resolution: stages["supplier_resolution"] = False
+        if args.skip_crossref:            stages["crossref"]            = False
 
     # Logging starts here (needs results_dir from config)
     results_dir = cfg.get("paths", {}).get("results_dir", str(PROJECT_ROOT / "ops" / "monitoring" / "pipeline-logs"))
@@ -410,6 +465,13 @@ def main():
         results["classify"] = ok
         if not ok and stop_on_failure:
             logger.error("Classify failed — aborting pipeline (stop_on_failure=true)")
+            sys.exit(1)
+
+    if stages["supplier_resolution"]:
+        ok = run_supplier_resolution(cfg)
+        results["supplier_resolution"] = ok
+        if not ok and stop_on_failure:
+            logger.error("Supplier resolution failed — aborting pipeline (stop_on_failure=true)")
             sys.exit(1)
 
     if stages["crossref"]:
