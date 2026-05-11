@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "compact": {
+      "source": "catlog22/claude-code-workflow",
+      "sourceType": "github",
+      "skillPath": ".codex/skills/memory-compact/SKILL.md",
+      "computedHash": "f32cf4c4269360a6da4c05c1c9fb4d28041258f7008a7041e93e052b9bb93a21"
+    }
+  }
+}
