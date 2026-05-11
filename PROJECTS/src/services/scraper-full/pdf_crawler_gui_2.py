@@ -1968,10 +1968,10 @@ class PDFCrawlerEnhancedApp:
         self.overview_log_area.insert(END, f"[{timestamp}] {message}\n")
         self.overview_log_area.see(END)
 
-    def log_crossref(self, message):
+    def log_crossref(self, message, tag=None):
         """Log message to cross-reference area with timestamp."""
         timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
-        self.crossref_log_area.insert(END, f"[{timestamp}] {message}\n")
+        self.crossref_log_area.insert(END, f"[{timestamp}] {message}\n", tag)
         self.crossref_log_area.see(END)
 
     def log_cleanup(self, message):
