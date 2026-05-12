@@ -60,7 +60,7 @@ REM ============================================================================
 
 echo [3/6] Installing dependencies...
 call venv\Scripts\activate.bat
-pip install -q watchdog flask flask-cors python-dotenv pyopenssl
+python ops\check_dependencies.py
 if %errorlevel% neq 0 (
     echo [ERROR] Failed to install dependencies
     echo Check your internet connection and try again
@@ -73,10 +73,21 @@ REM ============================================================================
 REM STEP 4: Create Required Directories
 REM ==============================================================================
 
-echo [4/6] Creating directories...
-mkdir ops >nul 2>&1
-mkdir data\som-in >nul 2>&1
-mkdir src\services\cross-reference\results >nul 2>&1
+echo [4/6] Creating directories and copying source files...
+if not exist ops mkdir ops
+if not exist data mkdir data
+if not exist data\som-in mkdir data\som-in
+if not exist src mkdir src
+if not exist src\services mkdir src\services
+if not exist src\services\cross-reference mkdir src\services\cross-reference
+if not exist src\services\cross-reference\results mkdir src\services\cross-reference\results
+
+REM Copy pipeline source from PROJECTS if it exists there
+if exist ..\PROJECTS\src\services\pipeline.py (
+    echo [INFO] Copying pipeline from PROJECTS...
+    xcopy /E /I /Y "..\PROJECTS\src\*" "src\" >nul 2>&1
+)
+
 echo [OK] Directories ready
 
 REM ==============================================================================
@@ -107,11 +118,11 @@ REM ============================================================================
 echo [6/6] Starting services...
 
 REM Start folder monitor
-start /B "Pipeline Monitor" cmd /c "call venv\Scripts\activate.bat && python ops/folder_monitor_service.py"
+start "Pipeline Monitor" cmd /c "call venv\Scripts\activate.bat && python ops/folder_monitor_service.py & pause"
 timeout /t 2 /nobreak >nul
 
 REM Start dashboard
-start /B "Pipeline Dashboard" cmd /c "call venv\Scripts\activate.bat && python ops/dashboard.py"
+start "Pipeline Dashboard" cmd /c "call venv\Scripts\activate.bat && python ops/dashboard.py & pause"
 timeout /t 2 /nobreak >nul
 
 echo [OK] Services started
