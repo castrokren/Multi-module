@@ -410,7 +410,48 @@ class PDFSmartFilter:
                 return ("noise", 0)
 
         return ("unknown", 25)
-    
+
+    def get_priority_score(self, filename):
+        """
+        Calculate priority score for a filename based on content patterns.
+        Positive scores = high priority (manual, instruction, guide, datasheet)
+        Negative scores = low priority (invoice, receipt, order form)
+        Zero/neutral = neither high nor low priority
+
+        Returns: float score (negative, zero, or positive)
+        """
+        if not filename or not isinstance(filename, str):
+            return 0.0
+
+        filename_lower = filename.lower()
+
+        # High priority patterns — return positive score
+        high_priority_keywords = [
+            'manual', 'instruction', 'guide', 'handbook', 'user guide',
+            'operation', 'setup', 'installation', 'configuration',
+            'reference', 'documentation', 'datasheet', 'specification',
+            'spec sheet', 'technical data', 'product info'
+        ]
+
+        for keyword in high_priority_keywords:
+            if keyword in filename_lower:
+                return 50.0  # Positive score for high priority
+
+        # Low priority patterns — return negative score
+        low_priority_keywords = [
+            'invoice', 'receipt', 'order', 'price list', 'catalog',
+            'drawing', 'dwg', 'cad', 'schematic', 'reprint', 'brochure',
+            'flyer', 'poster', 'advertisement', 'marketing', 'sales',
+            'part list', 'color code'
+        ]
+
+        for keyword in low_priority_keywords:
+            if keyword in filename_lower:
+                return -50.0  # Negative score for low priority
+
+        # Neutral/unknown filenames
+        return 0.0
+
     def filter_and_prioritize_pdfs(self, pdf_files, max_pdfs_per_category=None):
         """
         Filter and prioritize PDF files.
@@ -642,6 +683,13 @@ class CrossReferenceEngine:
                     print(f"❌ Traceback: {traceback.format_exc()}")
                 return False
             
+            # Validate required supplier column exists before processing
+            supplier_col_names = ['Supplier Name', 'Supplier', 'Vendor', 'Company']
+            if not any(col in input_df.columns for col in supplier_col_names):
+                print(f"❌ No supplier column found in input file. Available columns: {list(input_df.columns)}")
+                print(f"   Expected one of: {supplier_col_names}")
+                return False
+
             # Process items
             total_items = len(input_df)
             items_with_matches = 0
