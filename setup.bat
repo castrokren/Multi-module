@@ -74,9 +74,13 @@ REM STEP 4: Create Required Directories
 REM ==============================================================================
 
 echo [4/6] Creating directories...
-mkdir ops >nul 2>&1
-mkdir data\som-in >nul 2>&1
-mkdir src\services\cross-reference\results >nul 2>&1
+if not exist ops mkdir ops
+if not exist data mkdir data
+if not exist data\som-in mkdir data\som-in
+if not exist src mkdir src
+if not exist src\services mkdir src\services
+if not exist src\services\cross-reference mkdir src\services\cross-reference
+if not exist src\services\cross-reference\results mkdir src\services\cross-reference\results
 echo [OK] Directories ready
 
 REM ==============================================================================
@@ -107,11 +111,11 @@ REM ============================================================================
 echo [6/6] Starting services...
 
 REM Start folder monitor
-start /B "Pipeline Monitor" cmd /c "call venv\Scripts\activate.bat && python ops/folder_monitor_service.py"
+start "Pipeline Monitor" cmd /c "call venv\Scripts\activate.bat && python ops/folder_monitor_service.py & pause"
 timeout /t 2 /nobreak >nul
 
 REM Start dashboard
-start /B "Pipeline Dashboard" cmd /c "call venv\Scripts\activate.bat && python ops/dashboard.py"
+start "Pipeline Dashboard" cmd /c "call venv\Scripts\activate.bat && python ops/dashboard.py & pause"
 timeout /t 2 /nobreak >nul
 
 echo [OK] Services started
