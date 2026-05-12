@@ -1,3 +1,4 @@
+#403
 &45d
 -20
 -70
@@ -11,6 +12,7 @@
 100/
 17.7
 25.7
+2x/4x/10x
 3/5/7
 3/bag
 5.83
@@ -30,6 +32,7 @@ ammeter
 anaerobic chamber
 analyzer
 anemometer
+atlas
 atomic absorption
 atomic emission
 atomic force microscope
@@ -51,6 +54,7 @@ bundle
 buyout
 bx43fw
 bx51wi
+c170
 c170i
 c5-1
 cage
@@ -129,6 +133,7 @@ fb4209
 fb4220
 fisher
 fixed
+flint
 flow cytometer
 flow meter
 flow sorter
@@ -145,8 +150,10 @@ gc
 gc-ms
 gel electrophoresis
 gene
+gfp/rfp
 glass
 glove box
+gray
 h202
 h2o2
 heat
@@ -154,6 +161,7 @@ heating mantle
 hepa
 high
 hinged
+holds
 hose
 hplc
 hybez™
@@ -166,11 +174,13 @@ icp-ms
 image analyzer
 imager
 imaging
+inch
 incl
 incubator
 incubator_vios
 inductively coupled plasma
 input
+insert
 interferometer
 ion chromatograph
 is-18ca/is
@@ -200,6 +210,7 @@ legend
 leica
 length
 lens
+light
 liquid chromatograph
 listed
 load
@@ -219,6 +230,7 @@ mass spec
 mass spectrometer
 mateo
 maxwell(r
+meter
 miao
 micro
 micron
@@ -252,6 +264,7 @@ orbit
 oscilloscope
 other
 p31440
+packs
 particle counter
 payoff
 pcr
@@ -279,6 +292,7 @@ pump
 pure
 pyrometer
 qpcr
+quad
 quant
 quote
 quote#
@@ -292,6 +306,7 @@ refractometer
 rem/hat
 resistance temperature detector
 rheometer
+right
 rings
 rotary
 rotary evaporator
@@ -317,6 +332,7 @@ shaker incubator
 shield
 slide
 slider
+slides
 smart
 sold
 solix

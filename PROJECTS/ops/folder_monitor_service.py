@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Folder Monitor Service (Simplified)
+Folder Monitor Service (Polling-based)
 ====================================
 Watches input folder and runs pipeline automatically.
-Writes status files for dashboard to read.
+Uses polling instead of watchdog for better Windows compatibility.
 
 Usage:
     python folder_monitor_service.py
@@ -18,12 +18,19 @@ import subprocess
 import threading
 from pathlib import Path
 from datetime import datetime
-from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandler
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 INPUT_FOLDER = PROJECT_ROOT / "data" / "som-in"
 PIPELINE_SCRIPT = PROJECT_ROOT / "src" / "services" / "pipeline.py"
+
+# If pipeline.py doesn't exist at PROJECT_ROOT, check if we're in a repo clone where PROJECTS is a subfolder
+if not PIPELINE_SCRIPT.exists():
+    repo_root = PROJECT_ROOT.parents[0]
+    alt_pipeline = repo_root / "PROJECTS" / "src" / "services" / "pipeline.py"
+    if alt_pipeline.exists():
+        PROJECT_ROOT = repo_root / "PROJECTS"
+        INPUT_FOLDER = PROJECT_ROOT / "data" / "som-in"
+        PIPELINE_SCRIPT = alt_pipeline
 LOG_FILE = PROJECT_ROOT / "src" / "services" / "cross-reference" / "results" / "monitor_service.log"
 STATUS_FILE = PROJECT_ROOT / "src" / "services" / "cross-reference" / "results" / "status.json"
 HISTORY_FILE = PROJECT_ROOT / "src" / "services" / "cross-reference" / "results" / "run_history.json"
@@ -144,80 +151,79 @@ def run_pipeline(input_file: str) -> bool:
         write_status()
 
 
-class ExcelFileHandler(FileSystemEventHandler):
-    """Watch for new Excel files."""
+def check_for_new_files():
+    """Poll folder for new Excel files."""
+    if not INPUT_FOLDER.exists():
+        logger.error(f"Input folder not found: {INPUT_FOLDER}")
+        return
 
-    def on_created(self, event):
-        if event.is_directory or not event.src_path.endswith(".xlsx"):
-            return
+    try:
+        # Get all .xlsx files in the folder
+        xlsx_files = list(INPUT_FOLDER.glob("*.xlsx"))
 
-        file_path = event.src_path
-        file_name = os.path.basename(file_path)
-        logger.info(f"📁 New Excel file detected: {file_name}")
+        for file_path in xlsx_files:
+            file_path_str = str(file_path)
+            file_name = file_path.name
 
-        # Wait for file to be fully written
-        time.sleep(2)
+            # Skip if already processed
+            if file_path_str in last_processed_files:
+                continue
 
-        # Skip if already processed
-        if file_path in last_processed_files:
-            logger.info(f"⏭️  File already processed, skipping: {file_name}")
-            return
+            # Skip if pipeline is already running
+            if pipeline_running:
+                logger.info(f"⏳ Pipeline is already running, queueing file: {file_name}")
+                continue
 
-        # Skip if pipeline running
-        if pipeline_running:
-            logger.info(f"⏳ Pipeline is already running, queueing file: {file_name}")
-            return
+            # Wait a moment to ensure file is fully written
+            time.sleep(2)
 
-        # Run pipeline
-        last_processed_files.add(file_path)
-        logger.info(f"▶️  Starting pipeline for: {file_name}")
+            # Process this file
+            logger.info(f"📁 New Excel file detected: {file_name}")
+            last_processed_files.add(file_path_str)
+            logger.info(f"▶️  Starting pipeline for: {file_name}")
 
-        pipeline_thread = threading.Thread(
-            target=run_pipeline,
-            args=(file_name,),
-            daemon=True,
-        )
-        pipeline_thread.start()
+            pipeline_thread = threading.Thread(
+                target=run_pipeline,
+                args=(file_name,),
+                daemon=True,
+            )
+            pipeline_thread.start()
+
+    except Exception as e:
+        logger.error(f"Error checking folder: {e}")
 
 
 def start_monitor():
-    """Start watching input folder."""
+    """Start monitoring folder with polling."""
     if not INPUT_FOLDER.exists():
         logger.error(f"Input folder not found: {INPUT_FOLDER}")
         raise FileNotFoundError(f"Input folder does not exist: {INPUT_FOLDER}")
 
     logger.info("=" * 70)
-    logger.info("🚀 PIPELINE FOLDER MONITOR STARTED")
+    logger.info("🚀 PIPELINE FOLDER MONITOR STARTED (Polling Mode)")
     logger.info("=" * 70)
     logger.info(f"Watching folder: {INPUT_FOLDER}")
+    logger.info(f"Poll interval: 5 seconds")
     logger.info(f"Dashboard: https://localhost")
     logger.info("=" * 70)
 
-    event_handler = ExcelFileHandler()
-    observer = Observer()
-    observer.schedule(event_handler, str(INPUT_FOLDER), recursive=False)
-
     try:
-        observer.start()
         logger.info("✅ Folder monitor is active")
-
         write_status()  # Write initial status
 
-        # Keep running
+        # Keep polling
         while True:
-            time.sleep(10)
+            check_for_new_files()
+            time.sleep(5)  # Check every 5 seconds
 
     except KeyboardInterrupt:
         logger.info("⏹️  Stopping folder monitor (Ctrl+C)")
-        observer.stop()
 
     except Exception as e:
         logger.error(f"❌ Monitor error: {e}")
-        observer.stop()
         raise
 
     finally:
-        observer.join()
         logger.info("Folder monitor stopped")
 
 
