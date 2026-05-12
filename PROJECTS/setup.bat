@@ -77,16 +77,15 @@ echo [4/6] Creating directories and copying source files...
 if not exist ops mkdir ops
 if not exist data mkdir data
 if not exist data\som-in mkdir data\som-in
-if not exist src mkdir src
-if not exist src\services mkdir src\services
-if not exist src\services\cross-reference mkdir src\services\cross-reference
-if not exist src\services\cross-reference\results mkdir src\services\cross-reference\results
 
-REM Copy pipeline source from PROJECTS if it exists there
-if exist ..\PROJECTS\src\services\pipeline.py (
-    echo [INFO] Copying pipeline from PROJECTS...
-    xcopy /E /I /Y "..\PROJECTS\src\*" "src\" >nul 2>&1
+REM Copy entire src folder to parent directory for deployment
+if exist src (
+    echo [INFO] Copying pipeline source to deployment root...
+    xcopy /E /I /Y "src" "..\src" >nul 2>&1
 )
+
+REM Create results directory in src
+if not exist ..\src\services\cross-reference\results mkdir ..\src\services\cross-reference\results
 
 echo [OK] Directories ready
 
