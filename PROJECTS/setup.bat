@@ -90,7 +90,7 @@ if exist ops\cert.pem (
     python ops\generate_cert.py
     if %errorlevel% neq 0 (
         echo [WARN] Could not generate HTTPS certificate
-        echo Dashboard will run without HTTPS (use http://localhost:443)
+        echo Dashboard will run without HTTPS ^(use http://localhost:443^)
     ) else (
         echo [OK] HTTPS certificate generated
     )
