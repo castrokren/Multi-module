@@ -12,6 +12,7 @@
   },
 
   "pipeline": {
+    "run_data_cleaner":         true,
     "run_scraper":              true,
     "run_classify":             true,
     "run_supplier_resolution":  true,

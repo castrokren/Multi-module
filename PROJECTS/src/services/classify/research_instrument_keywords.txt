@@ -1,12 +1,31 @@
+&45d
 -20
 -70
 -80
+/promo
+0.1ml
+0.2--cm
+0.2ml
+01bs@ent
 10/300
+100/
 17.7
+25.7
+3/5/7
+3/bag
 5.83
+96well0.1
+a28568
 aas
 accelerometer
+accurion_i4
+active
+advia
+aeolus
+aeulos
 afm
+akta
+alias
 ammeter
 anaerobic chamber
 analyzer
@@ -15,40 +34,73 @@ atomic absorption
 atomic emission
 atomic force microscope
 autoclave
+axio
 balance
 barometer
 basic
+bath
+beacon
 being
+binoc
 bioreactor
 biosafety
 blower
+blue
 body
+bundle
+buyout
+bx43fw
+bx51wi
+c170i
 c5-1
+cage
 calorimeter
 calorimetry
+camera
+carboy
+cat#
+cell
 cell counter
 cell sorter
 cell-iq™
+celliq
+cells
+centf
 centrifuge
 centrifuge rotor
 chemidoc™
+chroma
 chromatograph
+clamp
 clean bench
+cm1950
+cm3050
 co2
 co2 incubator
 code
+cold
 colorimeter
 conductivity meter
 confocal microscope
 controller
+copper
+cord
+cover
 cryostat
 ctsi
+cu.ft
+custom
+cycler
+cytiva
 cytometer
 decibel meter
 densitometer
 dic
 differential interference contrast
+direct
+diret
 disk
+disp/waste
 dissolved oxygen
 dissolved oxygen meter
 distillation
@@ -57,16 +109,26 @@ do meter
 door
 dosing
 double
+dxr3xi
 dxrxi
+ecoflo
 eds
 electrometer
 electrophoresis
 elisa reader
+elite
+ella
 ellipsometer
 energy dispersive spectroscopy
 epiq
 evos
 exi600_lr
+expert
+fb4208
+fb4209
+fb4220
+fisher
+fixed
 flow cytometer
 flow meter
 flow sorter
@@ -85,13 +147,18 @@ gel electrophoresis
 gene
 glass
 glove box
+h202
+h2o2
 heat
 heating mantle
+hepa
 high
 hinged
 hose
 hplc
+hybez™
 hygrometer
+i100
 ic
 icp
 icp-aes
@@ -99,72 +166,125 @@ icp-ms
 image analyzer
 imager
 imaging
+incl
 incubator
+incubator_vios
 inductively coupled plasma
+input
 interferometer
 ion chromatograph
+is-18ca/is
+is-a90
 item#
+items
+jena
+kinas
+kmat
+knobs
+known
 l13-6
 l15-4
 l23119
 l23120
+l25100
 l28552
 l30257
+labrepco's
 laminar flow hood
 laptop
+large
+laser
 lc
 lc-ms
+legend
 leica
+length
+lens
 liquid chromatograph
+listed
+load
 load cell
 loop
+ltsc
 luminometer
 lux meter
 lyophilizer
 m3000
+ma95
 magnetic separator
+main
 manometer
 mantis
 mass spec
 mass spectrometer
 mateo
+maxwell(r
+miao
+micro
+micron
 microplate reader
 microscope
 microtome
+miseq
+mobile
 models
 module
+moto
 motor
 mp/chemidoc
+mt-1000/y51
 muffle furnace
+multi
 multimeter
 nephelometer
+nexus
 nikon
 nmr
+nomoto
+novac
 nuclear magnetic resonance
 octet
 ohmmeter
 oil bath
+opmi
 optics
+orbit
 oscilloscope
+other
+p31440
 particle counter
+payoff
 pcr
+pe-400
+peek
 ph meter
 phase contrast microscope
 phcbi
+pico
+plasma
 plate reader
 plus
+point
 polarimeter
+port
 potentiometer
 power
 pressure gauge
+prior
 probe
 promo
+pulse
 pulser
 pump
+pure
 pyrometer
 qpcr
+quant
 quote
+quote#
 raman
+rate
+real
 real-time pcr
 rebel
 reflectometer
@@ -172,38 +292,60 @@ refractometer
 rem/hat
 resistance temperature detector
 rheometer
+rings
+rotary
 rotary evaporator
 rotavap
 rotor
 rtd
+rtpcr
+s41i
+safety
 sample
 sand bath
 scales
 scanning electron microscope
 scanning tunneling microscope
 sem
+semg
 sensor
+sentec
 sequencer
 series
 shaker
 shaker incubator
+shield
+slide
 slider
 smart
 sold
+solix
+sonic
 sonicator
+sound
 sound level meter
 spectrofluorometer
 spectrometer
+spo2
 spray dryer
 st80i
+stage
 sticky
 stm
+storz
 strain gauge
 stress
+studio
+supply
 system
+sz51;microscope
 t-edge
+t-top
 tachometer
+tcpco2
 tem
+temp
+tempo
 tensiometer
 test
 thermal cycler
@@ -213,31 +355,52 @@ thermocouple
 thermocycler
 thermometer
 thermostat
+time
 toc analyzer
 torque meter
 total
+trace
 transilluminator
 transmission electron microscope
 tray
 tube furnace
 turbidimeter
 turbidity meter
+tx400
+u-an-2;analyzer
 ult
 ultra
 ultracentrifuge
+urocap
+v-10
 vacuum gauge
 vacuum oven
 vacuum pump
+valco
 vendor
+vessel
 vf-2
 vibration meter
+vios
 viscometer
+visor
 voltmeter
+w/esd,0.8-4x
+w/rotor
+water
 water bath
+well
 white
 whole
+win10
 x-ray
 x-ray diffractometer
 x-ray fluorescence
+x50i
+x50s
+x50t
+xcell
+xpr105
 xrd
 xrf
+zoom

@@ -2,8 +2,9 @@
 """
 Pipeline Orchestrator
 =====================
-Runs the three modules in sequence:
+Runs the four modules in sequence:
 
+    Stage 0 — Data Cleaning        : fix corrupted supplier names, normalize data
     Stage 1 — Scraper              : crawl supplier websites, download PDFs
     Stage 2 — Classify             : classify Excel items (Instrument / Software / Non-Instrument)
     Stage 2b — Supplier Resolution : resolve unknown suppliers via web search
@@ -157,6 +158,39 @@ def _validate_paths(cfg: dict, stages: dict) -> list[str]:
 # ---------------------------------------------------------------------------
 # Stage runners
 # ---------------------------------------------------------------------------
+
+def run_data_cleaner(cfg: dict) -> bool:
+    """Stage 0: clean input data before classification."""
+    logger.info("=" * 60)
+    logger.info("STAGE 0 — DATA CLEANING")
+    logger.info("=" * 60)
+
+    paths = cfg.get("paths", {})
+    input_dir = paths.get("input_excel_dir", "")
+
+    logger.info("Input directory: %s", input_dir)
+
+    try:
+        clean_all_input_excels = _import_from_file(
+            "data_cleaner",
+            SERVICES_ROOT / "data-cleaning" / "data_cleaner.py",
+            "clean_all_input_excels",
+        )
+    except ImportError as exc:
+        logger.error("Cannot import data cleaner: %s", exc)
+        return False
+
+    try:
+        result = clean_all_input_excels(input_dir, dry_run=False)
+        logger.info(
+            "Data cleaning finished — %d files processed, %d rows cleaned",
+            result["files_processed"], result["total_rows_cleaned"]
+        )
+        return True
+    except Exception as e:
+        logger.error("Data cleaning failed: %s", e)
+        return False
+
 
 def run_scraper(cfg: dict) -> bool:
     """Stage 1: crawl supplier websites and download PDFs."""
@@ -392,10 +426,12 @@ def main():
         "--config", default=str(SERVICES_ROOT / "pipeline_config.json"),
         help="Path to pipeline_config.json",
     )
+    parser.add_argument("--skip-data-cleaner",         action="store_true", help="Skip Stage 0 (Data Cleaning)")
     parser.add_argument("--skip-scraper",              action="store_true", help="Skip Stage 1 (Scraper)")
     parser.add_argument("--skip-classify",             action="store_true", help="Skip Stage 2 (Classify)")
     parser.add_argument("--skip-supplier-resolution",  action="store_true", help="Skip Stage 2b (Supplier Resolution)")
     parser.add_argument("--skip-crossref",             action="store_true", help="Skip Stage 3 (Cross-ref)")
+    parser.add_argument("--only-data-cleaner",         action="store_true", help="Run Stage 0 only")
     parser.add_argument("--only-scraper",              action="store_true", help="Run Stage 1 only")
     parser.add_argument("--only-classify",             action="store_true", help="Run Stage 2 only")
     parser.add_argument("--only-supplier-resolution",  action="store_true", help="Run Stage 2b only")
@@ -408,6 +444,7 @@ def main():
     # Resolve which stages to run
     pipe = cfg.get("pipeline", {})
     stages = {
+        "data_cleaner":         pipe.get("run_data_cleaner",         True),
         "scraper":              pipe.get("run_scraper",              True),
         "classify":             pipe.get("run_classify",             True),
         "supplier_resolution":  pipe.get("run_supplier_resolution",  True),
@@ -415,15 +452,18 @@ def main():
     }
 
     # CLI overrides
-    if args.only_scraper:
-        stages = {"scraper": True,  "classify": False, "supplier_resolution": False, "crossref": False}
+    if args.only_data_cleaner:
+        stages = {"data_cleaner": True, "scraper": False, "classify": False, "supplier_resolution": False, "crossref": False}
+    elif args.only_scraper:
+        stages = {"data_cleaner": False, "scraper": True,  "classify": False, "supplier_resolution": False, "crossref": False}
     elif args.only_classify:
-        stages = {"scraper": False, "classify": True,  "supplier_resolution": False, "crossref": False}
+        stages = {"data_cleaner": False, "scraper": False, "classify": True,  "supplier_resolution": False, "crossref": False}
     elif args.only_supplier_resolution:
-        stages = {"scraper": False, "classify": False, "supplier_resolution": True,  "crossref": False}
+        stages = {"data_cleaner": False, "scraper": False, "classify": False, "supplier_resolution": True,  "crossref": False}
     elif args.only_crossref:
-        stages = {"scraper": False, "classify": False, "supplier_resolution": False, "crossref": True}
+        stages = {"data_cleaner": False, "scraper": False, "classify": False, "supplier_resolution": False, "crossref": True}
     else:
+        if args.skip_data_cleaner:        stages["data_cleaner"]         = False
         if args.skip_scraper:             stages["scraper"]             = False
         if args.skip_classify:            stages["classify"]            = False
         if args.skip_supplier_resolution: stages["supplier_resolution"] = False
@@ -452,6 +492,13 @@ def main():
 
     stop_on_failure = pipe.get("stop_on_failure", False)
     results = {}
+
+    if stages["data_cleaner"]:
+        ok = run_data_cleaner(cfg)
+        results["data_cleaner"] = ok
+        if not ok and stop_on_failure:
+            logger.error("Data cleaning failed — aborting pipeline (stop_on_failure=true)")
+            sys.exit(1)
 
     if stages["scraper"]:
         ok = run_scraper(cfg)

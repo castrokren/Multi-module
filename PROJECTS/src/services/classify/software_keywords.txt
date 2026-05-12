@@ -1,3 +1,7 @@
+1.00
+18-4
+3.10
+above
 access
 acrobat
 activation
@@ -17,41 +21,56 @@ autocad
 automation
 availability
 aws
+azenta
 azure
 backup
+below
 bitbucket
 box
 bug fix
+bundle
 cat#
+cent
+centf
 chrome
 ci/cd
 citrix
 cloud
 cobit
 compliance
+cond
 confluence
 continuous deployment
 continuous integration
 creative cloud
 creative suite
+cryo
 crystal reports
 csv
+dell
 deployment
 devops
+dicom
 disaster recovery
+dlic
 docker
 documentation
 docx
+drawer,keyboar
 dropbox
 dynamics
+e264
+echo
 eclipse
 edge
 elasticsearch
 email
 encryption
 enhancement
+entry
 excel
 extension
+fa-24x
 feature
 firefox
 firewall
@@ -63,6 +82,7 @@ gdpr
 gen5
 git
 github
+gmpe
 google cloud
 google drive
 gotomeeting
@@ -72,6 +92,7 @@ halo
 hipaa
 hockey
 hotfix
+hs1/
 hyper-v
 iaas
 illustrator
@@ -89,16 +110,23 @@ jira
 json
 key
 keyp
+keypad
+keytek
 kibana
 kubernetes
 labchart
 labview
+laptop
+latest
 library
 licence
 license
+linear
 linux
 logging
+lumpl
 macos
+main
 maintenance
 malware
 matlab
@@ -109,13 +137,16 @@ module
 mohr
 mongodb
 monitoring
+mouse
 mtbf
 mttr
 mysql
+needle
 netbeans
 neurolucida
 nis elements
 nis-elements
+nomar
 notification
 office
 onedrive
@@ -125,6 +156,7 @@ oracle erp
 outlook
 paas
 package
+padnet
 patch
 patchmaster
 pci dss
@@ -147,6 +179,7 @@ prometheus
 python
 qlik
 r
+r2024a
 recovery
 redis
 release
@@ -169,6 +202,7 @@ scrum
 sdk
 seat
 security
+series
 server
 service level agreement
 servicenow
@@ -178,6 +212,7 @@ sketchup
 skype
 sla
 slack
+smart
 sms
 soap
 softmax
@@ -190,18 +225,23 @@ sql server
 ssas
 ssis
 ssrs
+start
 stick
+street
 subscription
 suite
 support
+system
 tableau
 teams
 toml
 training
+tray
 unix
 upgrade
 uptime
 version control
+view
 virtualbox
 visio
 visual studio
@@ -211,10 +251,13 @@ volocity
 vpn
 webex
 webhook
+wi-ucd
 windows
 word
 workday
 workflow
+wound
+x18l5s
 xlsx
 xml
 yaml
