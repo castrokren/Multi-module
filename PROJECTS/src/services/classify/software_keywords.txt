@@ -37,6 +37,7 @@ ci/cd
 citrix
 cloud
 cobit
+coded
 compliance
 cond
 confluence
@@ -251,6 +252,7 @@ volocity
 vpn
 webex
 webhook
+wheel
 wi-ucd
 windows
 word
