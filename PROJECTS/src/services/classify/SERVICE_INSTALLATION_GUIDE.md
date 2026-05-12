@@ -77,6 +77,19 @@ The service reads configuration from `monitor_config.json`. Make sure this file 
 }
 ```
 
+## Startup Requirements
+
+As of PR #1, the service no longer falls back to ExcelProcessor.
+AdaptiveExcelProcessor is required. Verify before deploying:
+
+- [ ] adaptive_excel_processor.py is present and importable
+- [ ] config.py exists with an `output_directory` attribute
+- [ ] All keyword files referenced in config are present and readable
+- [ ] Run: `python -c "from adaptive_excel_processor import AdaptiveExcelProcessor"`
+      Expected: no ImportError
+
+If any of the above fail, the service will not start.
+
 ## Service Features
 
 ### Standard Mode
