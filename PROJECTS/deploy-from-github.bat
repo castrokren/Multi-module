@@ -63,8 +63,9 @@ if exist Multi-module (
 )
 
 echo [3/3] Running pipeline setup...
+cd PROJECTS
 if not exist setup.bat (
-    echo [ERROR] setup.bat not found in repository
+    echo [ERROR] setup.bat not found in PROJECTS folder
     pause
     exit /b 1
 )
