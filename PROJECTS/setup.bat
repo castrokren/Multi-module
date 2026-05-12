@@ -55,7 +55,7 @@ if exist venv (
 )
 
 REM ==============================================================================
-REM STEP 3: Activate Virtual Environment & Install Dependencies
+REM STEP 3: Activate Virtual Environment and Install Dependencies
 REM ==============================================================================
 
 echo [3/6] Installing dependencies...
@@ -70,7 +70,7 @@ if %errorlevel% neq 0 (
 echo [OK] Dependencies installed
 
 REM ==============================================================================
-REM STEP 4: Create ops directory
+REM STEP 4: Create Required Directories
 REM ==============================================================================
 
 echo [4/6] Creating directories...
@@ -86,15 +86,19 @@ REM ============================================================================
 echo [5/6] Generating HTTPS certificate...
 if exist ops\cert.pem (
     echo [OK] Certificate already exists
-) else (
-    python ops\generate_cert.py
-    if %errorlevel% neq 0 (
-        echo [WARN] Could not generate HTTPS certificate
-        echo Dashboard will run without HTTPS ^(use http://localhost:443^)
-    ) else (
-        echo [OK] HTTPS certificate generated
-    )
+    goto step5_done
 )
+
+python ops\generate_cert.py
+if %errorlevel% equ 0 (
+    echo [OK] HTTPS certificate generated
+    goto step5_done
+)
+
+echo [WARN] Could not generate HTTPS certificate
+echo Dashboard will run without HTTPS
+
+:step5_done
 
 REM ==============================================================================
 REM STEP 6: Start Services
