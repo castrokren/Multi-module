@@ -227,6 +227,8 @@ def run_scraper(cfg: dict) -> bool:
         strict_content_validation= scfg.get("strict_content_validation", False),
         verbose                  = scfg.get("verbose", False),
         batch_size               = scfg.get("batch_size", 10),
+        skip_recent_sites        = scfg.get("skip_recent_sites", True),
+        days_before_rescrape     = scfg.get("days_before_rescrape", 7),
     )
 
     t0 = time.time()
