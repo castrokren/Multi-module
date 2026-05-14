@@ -21,7 +21,9 @@ import threading
 import logging
 import hashlib
 import gc
+import json
 from pathlib import Path
+from datetime import datetime, timedelta
 from urllib.parse import urlparse, urljoin
 
 import requests
@@ -118,6 +120,10 @@ class ScraperEngine:
         Log every page visit (noisy but useful for debugging).
     batch_size : int
         Number of suppliers processed per batch before gc.collect().
+    skip_recent_sites : bool
+        When True, skip suppliers that were scraped less than days_before_rescrape ago.
+    days_before_rescrape : int
+        Number of days before a supplier should be re-scraped (default 7).
     """
 
     def __init__(
@@ -131,6 +137,8 @@ class ScraperEngine:
         strict_content_validation: bool = False,
         verbose: bool = False,
         batch_size: int = 10,
+        skip_recent_sites: bool = True,
+        days_before_rescrape: int = 7,
     ):
         self.max_concurrent = max_concurrent
         self.request_delay = request_delay
@@ -141,11 +149,14 @@ class ScraperEngine:
         self.strict_content_validation = strict_content_validation
         self.verbose = verbose
         self.batch_size = batch_size
+        self.skip_recent_sites = skip_recent_sites
+        self.days_before_rescrape = days_before_rescrape
 
         self._stop_event = threading.Event()
         self.page_count = 0
         self.pdf_count = 0
         self.session = self._create_session()
+        self._scrape_state = {}  # Holds last-scrape timestamps
 
     # ------------------------------------------------------------------
     # Control
@@ -158,6 +169,66 @@ class ScraperEngine:
     @property
     def running(self) -> bool:
         return not self._stop_event.is_set()
+
+    # ------------------------------------------------------------------
+    # State file management (7-day smart detection)
+    # ------------------------------------------------------------------
+
+    def _get_state_file_path(self, output_dir: str) -> str:
+        """Return the path to the scraper state file."""
+        return os.path.join(output_dir, ".scraper_state.json")
+
+    def _load_scrape_state(self, output_dir: str) -> dict:
+        """Load last-scrape timestamps from state file. Return empty dict if missing or corrupted."""
+        state_file = self._get_state_file_path(output_dir)
+        if not os.path.exists(state_file):
+            return {}
+        try:
+            with open(state_file, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as exc:
+            logger.warning("Could not load scrape state from %s: %s — starting fresh", state_file, exc)
+            return {}
+
+    def _save_scrape_state(self, state: dict, output_dir: str) -> None:
+        """Save last-scrape timestamps to state file (atomic write)."""
+        state_file = self._get_state_file_path(output_dir)
+        try:
+            # Write to temp file first, then rename (atomic)
+            temp_file = state_file + ".tmp"
+            with open(temp_file, "w", encoding="utf-8") as f:
+                json.dump(state, f, indent=2)
+            # On Windows, rename handles file replacement; on Unix, remove first
+            if os.path.exists(state_file):
+                os.remove(state_file)
+            os.rename(temp_file, state_file)
+        except Exception as exc:
+            logger.error("Could not save scrape state to %s: %s", state_file, exc)
+
+    def _is_site_due_for_rescrape(self, supplier_name: str, state: dict, days: int) -> bool:
+        """Return True if supplier should be scraped (not in state or > days old)."""
+        if supplier_name not in state:
+            return True  # Never scraped before
+
+        try:
+            last_scrape_str = state[supplier_name]
+            last_scrape = datetime.fromisoformat(last_scrape_str)
+            days_since = (datetime.utcnow() - last_scrape).days
+            if days_since >= days:
+                logger.debug("Supplier %s last scraped %d days ago — due for rescrape",
+                           supplier_name, days_since)
+                return True
+            else:
+                logger.debug("Supplier %s scraped %d days ago — skipping (< %d days)",
+                           supplier_name, days_since, days)
+                return False
+        except Exception as exc:
+            logger.warning("Could not parse timestamp for %s: %s — will scrape", supplier_name, exc)
+            return True
+
+    def _update_scrape_timestamp(self, supplier_name: str, state: dict) -> None:
+        """Record the current UTC time as last-scrape for supplier."""
+        state[supplier_name] = datetime.utcnow().isoformat()
 
     # ------------------------------------------------------------------
     # Public entry point
@@ -173,6 +244,9 @@ class ScraperEngine:
             - ``Website``
 
         Returns a summary dict with keys ``pages``, ``pdfs``, ``suppliers``.
+
+        If skip_recent_sites=True, suppliers scraped less than days_before_rescrape
+        ago are skipped, saving time and bandwidth.
         """
         self._stop_event.clear()
         self.page_count = 0
@@ -187,8 +261,26 @@ class ScraperEngine:
             logger.warning("No suppliers with valid websites found in %s", supplier_excel)
             return {"pages": 0, "pdfs": 0, "suppliers": 0}
 
-        logger.info("Starting crawl: %d suppliers, batch_size=%d, max_concurrent=%d",
-                    len(pairs), self.batch_size, self.max_concurrent)
+        # Load scrape state and filter suppliers if enabled
+        self._scrape_state = self._load_scrape_state(output_dir)
+        original_count = len(pairs)
+
+        if self.skip_recent_sites:
+            pairs = [
+                (name, url) for name, url in pairs
+                if self._is_site_due_for_rescrape(name, self._scrape_state, self.days_before_rescrape)
+            ]
+            skipped = original_count - len(pairs)
+            if skipped > 0:
+                logger.info("Skipping %d supplier(s) that were scraped < %d days ago",
+                           skipped, self.days_before_rescrape)
+
+        if not pairs:
+            logger.info("All %d suppliers were recently scraped — nothing to do", original_count)
+            return {"pages": 0, "pdfs": 0, "suppliers": 0}
+
+        logger.info("Starting crawl: %d suppliers (from %d total), batch_size=%d, max_concurrent=%d",
+                    len(pairs), original_count, self.batch_size, self.max_concurrent)
 
         completed = 0
         _lock = threading.Lock()
@@ -236,6 +328,10 @@ class ScraperEngine:
                 logger.info("Batch %d/%d complete", batch_num, total_batches)
             gc.collect()
 
+        # Save updated scrape state
+        if self.skip_recent_sites:
+            self._save_scrape_state(self._scrape_state, output_dir)
+
         summary = {"pages": self.page_count, "pdfs": self.pdf_count, "suppliers": completed}
         logger.info("Crawl finished — pages=%d  pdfs=%d  suppliers=%d",
                     summary["pages"], summary["pdfs"], summary["suppliers"])
@@ -263,6 +359,11 @@ class ScraperEngine:
                 self.crawl_url_recursive(url, vendor_folder, supplier, visited_set=supplier_visited)
 
             logger.info("Finished %s — %d pages visited", supplier, len(supplier_visited))
+
+            # Update scrape timestamp on successful crawl (at least one page or PDF found)
+            if self.skip_recent_sites and (supplier_visited or self.pdf_count > 0):
+                self._update_scrape_timestamp(supplier, self._scrape_state)
+
         except Exception as exc:
             logger.error("Failed to crawl %s: %s", supplier, exc)
 
@@ -425,116 +526,4 @@ class ScraperEngine:
 
             content_type = resp.headers.get("content-type", "").lower()
             content_length = resp.headers.get("content-length")
-            max_bytes = self.max_pdf_size_mb * 1024 * 1024
-
-            if content_length and int(content_length) > max_bytes:
-                logger.warning("Skipping oversized PDF (%.1f MB): %s",
-                               int(content_length) / (1024 * 1024), pdf_url)
-                return
-            if self.strict_content_validation and "pdf" not in content_type and not pdf_url.lower().endswith(".pdf"):
-                logger.warning("Skipping non-PDF content-type: %s", pdf_url)
-                return
-
-            downloaded = 0
-            with open(file_path, "wb") as fh:
-                for chunk in resp.iter_content(chunk_size=8192):
-                    if not self.running:
-                        fh.close()
-                        os.remove(file_path)
-                        return
-                    downloaded += len(chunk)
-                    if downloaded > max_bytes:
-                        fh.close()
-                        os.remove(file_path)
-                        logger.warning("Removed oversized download: %s", pdf_url)
-                        return
-                    fh.write(chunk)
-
-            if os.path.getsize(file_path) < self.min_pdf_size_bytes:
-                os.remove(file_path)
-                logger.warning("Removed undersized PDF (%d bytes): %s",
-                               os.path.getsize(file_path) if os.path.exists(file_path) else 0, filename)
-                return
-
-            self.pdf_count += 1
-            logger.info("Downloaded: %s/%s (%.1f MB)",
-                        supplier, filename, os.path.getsize(file_path) / (1024 * 1024))
-
-        except requests.exceptions.Timeout:
-            logger.warning("Timeout downloading %s", pdf_url)
-        except requests.exceptions.RequestException as exc:
-            logger.warning("Download failed for %s: %s", pdf_url, exc)
-        except Exception as exc:
-            logger.error("Error downloading %s: %s", pdf_url, exc)
-            try:
-                if os.path.exists(file_path):
-                    os.remove(file_path)
-            except Exception:
-                pass
-
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
-
-    def _create_session(self) -> requests.Session:
-        """Build a polite, retry-equipped requests session."""
-        session = requests.Session()
-        retry = Retry(
-            total=3,
-            backoff_factor=1.5,
-            status_forcelist=[429, 500, 502, 503, 504, 522, 524],
-            allowed_methods=["GET"],
-            raise_on_status=False,
-        )
-        adapter = _RateLimitedAdapter(
-            request_delay=self.request_delay,
-            max_retries=retry,
-            pool_connections=20,
-            pool_maxsize=20,
-        )
-        session.mount("http://", adapter)
-        session.mount("https://", adapter)
-        session.verify = True
-        session.headers.update({
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/91.0.4472.124 Safari/537.36"
-            ),
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.5",
-            "DNT": "1",
-        })
-        return session
-
-    def _load_supplier_pairs(self, supplier_excel: str) -> list[tuple[str, str]]:
-        """Read supplier name + website pairs from an Excel file."""
-        try:
-            df = pd.read_excel(supplier_excel)
-        except Exception as exc:
-            logger.error("Cannot read supplier list %s: %s", supplier_excel, exc)
-            return []
-
-        # Flexible column detection
-        name_col = next((c for c in df.columns if "supplier" in c.lower() and "name" in c.lower()), None)
-        url_col  = next((c for c in df.columns if c.lower() in ("website", "url", "web", "site")), None)
-
-        if not name_col or not url_col:
-            logger.error("Supplier Excel must have 'Supplier Name' and 'Website' columns. Found: %s",
-                         list(df.columns))
-            return []
-
-        pairs = []
-        for _, row in df.iterrows():
-            name = str(row[name_col]).strip()
-            url  = str(row[url_col]).strip()
-            if name and url and url.lower() not in ("nan", "none", ""):
-                if not url.startswith(("http://", "https://")):
-                    url = "https://" + url
-                if _validate_url(url):
-                    pairs.append((name, url))
-                else:
-                    logger.warning("Invalid URL skipped for %s: %s", name, url)
-
-        logger.info("Loaded %d valid supplier(s) from %s", len(pairs), supplier_excel)
-        return pairs
+            max_byt
