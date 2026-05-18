@@ -5,6 +5,15 @@ Standalone Cross-reference Module
 
 import sys
 import os
+from pathlib import Path
+
+# Ensure the module's own directory is in sys.path for local imports
+# This is needed when the module is loaded via importlib.util.spec_from_file_location
+# (which happens in pipeline.py) so that "from crossref_utils import ..." works
+_MODULE_DIR = Path(__file__).parent
+if str(_MODULE_DIR) not in sys.path:
+    sys.path.insert(0, str(_MODULE_DIR))
+
 import re
 import time
 import traceback
