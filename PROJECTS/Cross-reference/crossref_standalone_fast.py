@@ -501,13 +501,44 @@ class PDFSmartFilter:
         return filtered_pdfs
 
 class CrossReferenceEngine:
-    
+
     def __init__(self):
         self.results = []
         self.parent_gui_processes = []  # Track child processes for cleanup
         self.pdf_filter = PDFSmartFilter()  # Initialize smart PDF filtering
+        self.state = self._load_state()  # Load existing state to track scanned directories
         print("CrossReferenceEngine initialized with smart PDF filtering")
     
+    def _load_state(self):
+        """Load saved state to track which directories have been scanned."""
+        state_file = os.path.join(os.path.dirname(__file__), '.crossref_state.json')
+        if os.path.exists(state_file):
+            try:
+                import json
+                with open(state_file, 'r') as f:
+                    return json.load(f)
+            except Exception as e:
+                print(f"⚠️ Failed to load state file: {e}")
+                return {'scanned_suppliers': [], 'last_run': None}
+        return {'scanned_suppliers': [], 'last_run': None}
+
+    def _save_state(self):
+        """Save current state to prevent rescanning."""
+        state_file = os.path.join(os.path.dirname(__file__), '.crossref_state.json')
+        try:
+            import json
+            self.state['last_run'] = datetime.now().isoformat()
+            with open(state_file, 'w') as f:
+                json.dump(self.state, f, indent=2)
+        except Exception as e:
+            print(f"⚠️ Failed to save state file: {e}")
+
+    def _mark_supplier_scanned(self, supplier_name):
+        """Mark a supplier directory as scanned to prevent rescanning."""
+        if supplier_name not in self.state['scanned_suppliers']:
+            self.state['scanned_suppliers'].append(supplier_name)
+            self._save_state()
+
     def _get_fallback_memory_gb(self):
         """Get estimated memory in GB using fallback methods when psutil is not available."""
         try:
@@ -1234,32 +1265,6 @@ class CrossReferenceEngine:
         """High-performance cross-reference analysis - now uses supplier-by-supplier approach."""
         return self.run_cross_reference_by_supplier(input_file, master_file, pdf_dir, threshold, test_mode, low_cpu_mode, clean_output)
 
-    def find_matching_pdfs(self, item_code, description, category, pdf_dir, master_df, threshold, input_df=None):
-        """Find matching PDFs by searching only in the specific supplier directory."""
-        matches = []
-        start_time = time.time()
-        
-        try:
-            # This method is kept for compatibility but now uses supplier-by-supplier approach
-            print(f"    🔍 Legacy method called for item: {item_code}")
-            print(f"    💡 Consider using run_cross_reference_by_supplier for better performance")
-            return matches
-            
-        except Exception as e:
-            print(f"    ❌ Error in find_matching_pdfs: {e}")
-            return matches
-
-    def find_matching_pdfs_high_performance(self, item_code, description, category, pdf_dir, master_df, threshold, input_df=None, low_cpu_mode=False):
-        """High-performance PDF matching using multiprocessing - now uses supplier-by-supplier approach."""
-        try:
-            # This method is kept for compatibility but now uses supplier-by-supplier approach
-            print(f"    🔍 Legacy high-performance method called for item: {item_code}")
-            print(f"    💡 Consider using run_cross_reference_by_supplier for better performance")
-            return []
-            
-        except Exception as e:
-            print(f"    ❌ Error in find_matching_pdfs_high_performance: {e}")
-            return []
 
     def extract_keywords(self, description, category):
         """Extract keywords with optimized performance."""
@@ -1498,14 +1503,23 @@ class CrossReferenceEngine:
                     print(f"      💡 Suggested best match: '{best_match[0]}' (similarity: {best_match[1]:.3f})")
                     print(f"      ⚠️ Consider manually checking if this is the correct supplier directory")
                 
-                # FALLBACK: If no supplier directory found, search all directories
-                print(f"      🔄 FALLBACK: Searching all PDF directories since no supplier match found")
+                # FALLBACK: If no supplier directory found, search unscanned directories only
+                print(f"      🔄 FALLBACK: Searching PDF directories (skipping already-scanned suppliers)")
                 all_pdf_files = []
+                already_scanned = set(self.state.get('scanned_suppliers', []))
                 for supplier_dir in available_suppliers:
+                    # SKIP already-scanned suppliers to prevent rescanning
+                    if supplier_dir in already_scanned:
+                        print(f"      ⏭️ SKIPPING already-scanned supplier: {supplier_dir}")
+                        continue
+
                     supplier_path = os.path.join(pdf_dir, supplier_dir)
                     pdf_files = [f for f in os.listdir(supplier_path) if f.lower().endswith('.pdf')]
                     for pdf_file in pdf_files:
                         all_pdf_files.append((os.path.join(supplier_path, pdf_file), supplier_dir))
+
+                    # Mark this supplier as now-scanned
+                    self._mark_supplier_scanned(supplier_dir)
                 
                 print(f"      📂 FALLBACK: Will search {len(all_pdf_files)} PDF files across all directories")
                 
