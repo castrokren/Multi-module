@@ -157,12 +157,18 @@ REM Exit Points
 REM ============================================================================
 :SUCCESS_EXIT
 echo [%TIMESTAMP%] ===== UPDATE SUCCESSFUL ===== >> "%DEPLOYMENT_LOG%"
-echo [%TIMESTAMP%] Logfile: %DEPLOYMENT_LOG%
+echo.
+echo Logfile: %DEPLOYMENT_LOG%
+echo.
+pause
 endlocal
 exit /b 0
 
 :ERROR_EXIT
 echo [%TIMESTAMP%] ===== UPDATE FAILED ===== >> "%DEPLOYMENT_LOG%"
-echo [%TIMESTAMP%] Check log: %DEPLOYMENT_LOG%
+echo.
+echo Check log: %DEPLOYMENT_LOG%
+echo.
+pause
 endlocal
 exit /b 1
