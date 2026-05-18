@@ -152,8 +152,7 @@ class AdaptiveExcelProcessor:
         
         # Remove model numbers, serial numbers, and measurements
         desc_clean = re.sub(r'\b[A-Z0-9\-]{6,}\b', '', desc_clean)  # Model numbers like MDF-C2156VANC-PA
-        desc_clean = re.sub(r'\b\d+\s*(cu\.ft\.|volts?|v|w|a|hz|rpm|db|lux|psi|bar)\b', '', desc_clean)  # Measurements
-        desc_clean = re.sub(r'\b\d+\.\d+\s*(cu\.ft\.|volts?|v|w|a|hz|rpm|db|lux|psi|bar)\b', '', desc_clean)  # Decimal measurements
+        desc_clean = re.sub(r'\b(?:\d+|\d+\.\d+)\s*(cu\.ft\.|volts?|v|w|a|hz|rpm|db|lux|psi|bar)\b', '', desc_clean)  # Measurements
         
         # Extract words
         words = desc_clean.split()
