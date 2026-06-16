@@ -144,9 +144,13 @@ class AdaptiveExcelProcessor:
 
     def extract_keywords_from_description(self, description):
         """Enhanced keyword extraction with better filtering."""
-        if not description:
+        if not description or pd.isna(description):
             return []
-        
+
+        # Ensure description is a string
+        if not isinstance(description, str):
+            description = str(description)
+
         # Clean the description
         desc_clean = description.lower()
         
@@ -174,6 +178,8 @@ class AdaptiveExcelProcessor:
 
     def calculate_keyword_confidence(self, keyword, description):
         """Calculate confidence score for a potential keyword."""
+        if not isinstance(description, str):
+            description = str(description)
         desc_lower = description.lower()
         confidence = 1.0
         
@@ -253,7 +259,7 @@ class AdaptiveExcelProcessor:
             raise ValueError(f"Unsupported file format: {file_ext}")
         
         try:
-            df = pd.read_excel(file_path, header=1, engine=engine)
+            df = pd.read_excel(file_path, header=0, engine=engine)
             logging.info(f"Successfully read {file_path.name} using {engine} engine")
             return df
         except Exception as e:
@@ -294,9 +300,13 @@ class AdaptiveExcelProcessor:
     
     def classify_by_vendor(self, vendor_name):
         """Classify item based on vendor name."""
-        if not vendor_name:
+        if not vendor_name or pd.isna(vendor_name):
             return None
-            
+
+        # Ensure vendor_name is a string
+        if not isinstance(vendor_name, str):
+            vendor_name = str(vendor_name)
+
         vendor_lower = vendor_name.lower()
         
         # Check each category's vendor keywords
@@ -313,9 +323,13 @@ class AdaptiveExcelProcessor:
 
     def classify_item(self, description, vendor=None):
         """Classify item based on description and vendor with three-category system."""
-        if not description:
+        if not description or pd.isna(description):
             return "Unknown"
-            
+
+        # Ensure description is a string
+        if not isinstance(description, str):
+            description = str(description)
+
         desc_lower = description.lower()
         
         # STRONG vendor-based classification (highest priority)
@@ -588,7 +602,12 @@ Top Instrument Candidates:
             desc_col = self.find_description_column(df)
             supplier_col = self.find_supplier_column(df)
             df = self.clean_dataframe(df)
-            
+
+            # Ensure description and supplier columns are strings
+            df[desc_col] = df[desc_col].astype(str)
+            if supplier_col and supplier_col in df.columns:
+                df[supplier_col] = df[supplier_col].astype(str)
+
             # Classify items using both description and supplier (learning happens here)
             if supplier_col and supplier_col in df.columns:
                 # Use both description and supplier for classification
@@ -623,7 +642,9 @@ Top Instrument Candidates:
             return True
             
         except Exception as e:
+            import traceback
             logging.error(f"Error processing {file_path}: {e}")
+            logging.error(f"Traceback: {traceback.format_exc()}")
             return False
 
     def process_directory(self, directory_path, auto_promote=True, min_occurrences=None, test_mode=False):
