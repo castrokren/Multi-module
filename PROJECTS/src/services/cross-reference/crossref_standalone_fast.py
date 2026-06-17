@@ -143,17 +143,20 @@ def process_single_pdf(args):
     try:
         # Extract text from PDF
         pdf_text = extract_pdf_text_standalone(pdf_path)
-        
+
         if GlobalStopManager.should_stop():
             return None
-        
+
         if not pdf_text:
             return None
-        
+
+        # Save extracted text to documents_text directory
+        save_extracted_text(pdf_path, pdf_text)
+
         # Check global stop flag again
         if GlobalStopManager.should_stop():
             return None
-        
+
         # Calculate match score with filename filtering
         score = calculate_match_score_standalone(search_keywords, pdf_text, description, threshold, pdf_path)
         
@@ -169,7 +172,24 @@ def process_single_pdf(args):
     except Exception as e:
         return None
 
-def extract_pdf_text_standalone(pdf_path, timeout_seconds=15):
+def save_extracted_text(pdf_path, extracted_text):
+    """Save extracted PDF text to documents_text directory."""
+    try:
+        output_dir = Path("C:/Data/Crawler/pdf_discovery/documents_text")
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Create filename from PDF filename
+        pdf_name = Path(pdf_path).stem
+        supplier_name = Path(pdf_path).parent.name
+        output_file = output_dir / f"{supplier_name}_{pdf_name}.txt"
+
+        # Save text
+        with open(output_file, 'w', encoding='utf-8') as f:
+            f.write(extracted_text)
+    except Exception as e:
+        pass  # Silent fail - don't disrupt PDF processing
+
+def extract_pdf_text_standalone(pdf_path, timeout_seconds=15, save_text=False):
     """Standalone PDF text extraction function for multiprocessing."""
     try:
         # Check if file exists and is readable
