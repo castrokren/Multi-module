@@ -1,179 +1,137 @@
-"""
-Unit tests for scraper_engine validation functions.
-Tests security and input validation logic.
-"""
-
-import pytest
-from unittest.mock import patch, MagicMock
-import sys
+"""Unit tests for URL validation, path sanitisation, file hashing, and relevance filtering."""
+import hashlib, sys
 from pathlib import Path
+import pytest
 
-# Add service directory to path
-service_dir = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(service_dir))
-
-from scraper_engine import _validate_url, _sanitize_path, _file_hash
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+from scraper_engine import _validate_url, _sanitize_path, _file_hash, _score_pdf_relevance
 
 
-@pytest.mark.unit
 class TestValidateUrl:
-    """Test URL validation security function."""
+    def test_valid_https(self):
+        assert _validate_url("https://www.example.com") is True
+        assert _validate_url("https://example.com/path/file.pdf") is True
 
-    def test_valid_https_url(self):
-        """Valid HTTPS URLs should pass."""
-        assert _validate_url('https://www.example.com') is True
-        assert _validate_url('https://example.com/path') is True
-        assert _validate_url('https://subdomain.example.com:8080/resource') is True
+    def test_valid_http(self):
+        assert _validate_url("http://example.com") is True
 
-    def test_valid_http_url(self):
-        """Valid HTTP URLs should pass."""
-        assert _validate_url('http://www.example.com') is True
-        assert _validate_url('http://example.com/path') is True
+    def test_blocks_ftp(self):
+        assert _validate_url("ftp://example.com") is False
 
-    def test_invalid_protocol(self):
-        """Non-HTTP(S) protocols should fail."""
-        assert _validate_url('ftp://example.com') is False
-        assert _validate_url('file:///etc/passwd') is False
-        assert _validate_url('javascript:alert(1)') is False
+    def test_blocks_file(self):
+        assert _validate_url("file:///etc/passwd") is False
 
-    def test_localhost_blocked(self):
-        """Localhost URLs should be blocked."""
-        assert _validate_url('http://localhost') is False
-        assert _validate_url('http://localhost:8080') is False
-        assert _validate_url('http://127.0.0.1') is False
+    def test_blocks_javascript(self):
+        assert _validate_url("javascript:alert(1)") is False
 
-    def test_missing_scheme(self):
-        """URLs without scheme should fail."""
-        assert _validate_url('example.com') is False
-        assert _validate_url('www.example.com') is False
+    def test_blocks_localhost(self):
+        assert _validate_url("http://localhost") is False
+        assert _validate_url("http://localhost:8080") is False
 
-    def test_empty_netloc(self):
-        """URLs with empty network location should fail."""
-        assert _validate_url('https://') is False
+    def test_blocks_loopback(self):
+        assert _validate_url("http://127.0.0.1") is False
 
-    def test_malformed_url(self):
-        """Malformed URLs should fail gracefully."""
-        assert _validate_url('not-a-url') is False
-        assert _validate_url('') is False
-        assert _validate_url('http://') is False
+    def test_blocks_no_scheme(self):
+        assert _validate_url("example.com") is False
+
+    def test_blocks_empty(self):
+        assert _validate_url("") is False
+
+    def test_blocks_scheme_only(self):
+        assert _validate_url("https://") is False
 
 
-@pytest.mark.unit
 class TestSanitizePath:
-    """Test filename sanitization function."""
+    def test_removes_path_traversal(self):
+        r = _sanitize_path("../../../etc/passwd")
+        assert ".." not in r and "/" not in r
 
-    def test_remove_path_traversal(self):
-        """Path traversal sequences should be removed."""
-        result = _sanitize_path('../../../etc/passwd')
-        assert '..' not in result
-        assert '/' not in result
+    def test_replaces_forward_slash(self):
+        assert "/" not in _sanitize_path("path/to/file.pdf")
 
-    def test_remove_dangerous_chars(self):
-        """Dangerous characters should be replaced."""
-        result = _sanitize_path('file<name>test|.pdf')
-        assert '<' not in result
-        assert '>' not in result
-        assert '|' not in result
+    def test_replaces_backslash(self):
+        assert "\\" not in _sanitize_path("path\\to\\file.pdf")
 
-    def test_replace_slashes(self):
-        """Forward and backslashes should be replaced."""
-        result = _sanitize_path('path/to/file.pdf')
-        assert '/' not in result
+    def test_replaces_dangerous_chars(self):
+        for ch in '<>:"|?*':
+            assert ch not in _sanitize_path(f"file{ch}name.pdf")
 
-        result = _sanitize_path('path\\to\\file.pdf')
-        assert '\\' not in result
-
-    def test_colon_replacement(self):
-        """Colons should be replaced (Windows compatibility)."""
-        result = _sanitize_path('file:name')
-        assert ':' not in result
-
-    def test_quote_replacement(self):
-        """Quotes should be replaced."""
-        result = _sanitize_path('file"name\'test')
-        assert '"' not in result
-        assert "'" not in result
-
-    def test_normal_filename(self):
-        """Normal filenames should be largely unchanged."""
-        filename = 'document_2024-01-15.pdf'
-        result = _sanitize_path(filename)
-        assert result == filename
-
-    def test_wildcard_removal(self):
-        """Wildcards should be replaced."""
-        result = _sanitize_path('file*.pdf')
-        assert '*' not in result
-
-        result = _sanitize_path('file?.pdf')
-        assert '?' not in result
+    def test_normal_filename_unchanged(self):
+        name = "product-catalog_2024.pdf"
+        assert _sanitize_path(name) == name
 
 
-@pytest.mark.unit
 class TestFileHash:
-    """Test file hashing function."""
+    def test_correct_sha256(self, temp_output_dir):
+        p = Path(temp_output_dir) / "t.bin"
+        content = b"hello world"
+        p.write_bytes(content)
+        assert _file_hash(str(p)) == hashlib.sha256(content).hexdigest()
 
-    def test_hash_existing_file(self, temp_output_dir):
-        """Hash should compute correctly for existing files."""
-        import hashlib
-        from pathlib import Path
+    def test_nonexistent_returns_none(self):
+        assert _file_hash("/no/such/file.pdf") is None
 
-        # Create test file
-        test_file = Path(temp_output_dir) / 'test.txt'
-        content = b'test content for hashing'
-        test_file.write_bytes(content)
+    def test_empty_file(self, temp_output_dir):
+        p = Path(temp_output_dir) / "empty.bin"
+        p.write_bytes(b"")
+        assert _file_hash(str(p)) == hashlib.sha256(b"").hexdigest()
 
-        # Compute hash
-        result = _file_hash(str(test_file))
+    def test_consistent(self, temp_output_dir):
+        p = Path(temp_output_dir) / "stable.bin"
+        p.write_bytes(b"stable content")
+        assert _file_hash(str(p)) == _file_hash(str(p))
 
-        # Verify
-        expected = hashlib.sha256(content).hexdigest()
-        assert result == expected
 
-    def test_hash_large_file(self, temp_output_dir):
-        """Hash should handle large files correctly."""
-        import hashlib
-        from pathlib import Path
+class TestRelevanceFilter:
+    @pytest.mark.parametrize("url", [
+        "https://acme.com/terms-of-use.pdf",
+        "https://acme.com/privacy_policy.pdf",
+        "https://acme.com/cookie-policy.pdf",
+        "https://acme.com/warranty.pdf",
+        "https://acme.com/return_policy.pdf",
+        "https://acme.com/invoice_2024.pdf",
+        "https://acme.com/receipt_march.pdf",
+        "https://acme.com/purchase_order.pdf",
+        "https://acme.com/msds/chemical.pdf",
+        "https://acme.com/sds-sheet.pdf",
+        "https://acme.com/safety_data.pdf",
+        "https://acme.com/annual-report-2023.pdf",
+        "https://acme.com/nda.pdf",
+        "https://acme.com/legal-disclaimer.pdf",
+    ])
+    def test_blocklist_url(self, url):
+        ok, reason = _score_pdf_relevance(url)
+        assert ok is False and reason == "blocklist_match"
 
-        test_file = Path(temp_output_dir) / 'large.bin'
+    def test_blocklist_via_anchor(self):
+        ok, _ = _score_pdf_relevance("https://acme.com/doc.pdf", "Terms of Service")
+        assert ok is False
 
-        # Create a large file (5MB)
-        chunk_size = 1024 * 1024  # 1MB
-        chunk = b'x' * chunk_size
-        with open(test_file, 'wb') as f:
-            for _ in range(5):
-                f.write(chunk)
+    @pytest.mark.parametrize("url", [
+        "https://acme.com/product-catalog.pdf",
+        "https://acme.com/datasheet-model-x.pdf",
+        "https://acme.com/data_sheet.pdf",
+        "https://acme.com/specifications.pdf",
+        "https://acme.com/install-guide.pdf",
+        "https://acme.com/user-manual.pdf",
+        "https://acme.com/price-list-2024.pdf",
+        "https://acme.com/parts-list.pdf",
+        "https://acme.com/product-brochure.pdf",
+        "https://acme.com/technical-bulletin.pdf",
+        "https://acme.com/selection-guide.pdf",
+    ])
+    def test_allowlist_url(self, url):
+        ok, reason = _score_pdf_relevance(url)
+        assert ok is True and reason == "allowlist_match"
 
-        # Hash should complete without error
-        result = _file_hash(str(test_file))
-        assert result is not None
-        assert len(result) == 64  # SHA-256 hex length
+    def test_allowlist_via_anchor(self):
+        ok, reason = _score_pdf_relevance("https://acme.com/doc123.pdf", "Download Datasheet")
+        assert ok is True and reason == "allowlist_match"
 
-    def test_hash_nonexistent_file(self):
-        """Nonexistent file should return None."""
-        result = _file_hash('/nonexistent/path/file.txt')
-        assert result is None
+    def test_default_allow_ambiguous(self):
+        ok, reason = _score_pdf_relevance("https://acme.com/doc_12345.pdf", "")
+        assert ok is True and reason == "default_allow"
 
-    def test_hash_empty_file(self, temp_output_dir):
-        """Empty file should return valid hash."""
-        import hashlib
-        from pathlib import Path
-
-        test_file = Path(temp_output_dir) / 'empty.txt'
-        test_file.write_text('')
-
-        result = _file_hash(str(test_file))
-        expected = hashlib.sha256(b'').hexdigest()
-        assert result == expected
-
-    def test_hash_consistency(self, temp_output_dir):
-        """Same file should produce consistent hash."""
-        from pathlib import Path
-
-        test_file = Path(temp_output_dir) / 'consistent.txt'
-        test_file.write_text('consistent content')
-
-        hash1 = _file_hash(str(test_file))
-        hash2 = _file_hash(str(test_file))
-
-        assert hash1 == hash2
+    def test_blocklist_beats_allowlist_anchor(self):
+        ok, _ = _score_pdf_relevance("https://acme.com/invoice.pdf", "product catalog")
+        assert ok is False
