@@ -22,6 +22,14 @@ Crawler Projects - Python-based document scraping, classification, and cross-ref
 | Write docs | /docs | CONTEXT.md | doc-authoring-skill |
 | Deploy or debug | /ops | CONTEXT.md | - |
 
+## Data Directories (CRITICAL - Do not change)
+**All data lives in `C:\Data\Crawler\` - NOT in the project repo**
+
+- `C:\Data\Crawler\input\` - Raw CSV input files (supplier requisitions)
+- `C:\Data\Crawler\labeled\` - Classified Excel files (with TYPE column)
+- `C:\Data\Crawler\output\` - Scraped PDFs organized by supplier folder
+- Pipeline config points to these external directories in `pipeline_config.json`
+
 ## Naming conventions
 - Service folders: kebab-case (`cross-reference`, `scraper-full`)
 - Python files: snake_case.py
