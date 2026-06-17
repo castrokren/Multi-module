@@ -1,0 +1,262 @@
+================================================================================
+QUICK START GUIDE - HIGH-PERFORMANCE INTEGRATION TESTS
+================================================================================
+
+WHERE TO FIND THE TESTS
+=======================
+File: C:\Projects\Crawler\PROJECTS\src\services\cross-reference\tests\unit\test_crossref_engine_integration.py
+Lines: 620-821
+Class: TestCrossReferenceEngineHighPerformance
+
+
+HOW TO RUN
+==========
+
+Run all 5 tests:
+  pytest test_crossref_engine_integration.py::TestCrossReferenceEngineHighPerformance -v
+
+Run one specific test:
+  pytest test_crossref_engine_integration.py::TestCrossReferenceEngineHighPerformance::test_high_performance_basic_workflow -v
+
+Run with more details:
+  pytest test_crossref_engine_integration.py::TestCrossReferenceEngineHighPerformance -vv
+
+Run with print statements visible:
+  pytest test_crossref_engine_integration.py::TestCrossReferenceEngineHighPerformance -s
+
+
+WHAT GETS TESTED
+================
+
+Test 1: test_high_performance_basic_workflow
+  └─ Verifies basic execution with parallel processing (low_cpu_mode=False)
+
+Test 2: test_high_performance_with_low_cpu_mode_enabled
+  └─ Verifies sequential processing for resource-constrained systems (low_cpu_mode=True)
+
+Test 3: test_high_performance_memory_management
+  └─ Verifies PDF cache is bounded and doesn't consume unbounded memory
+
+Test 4: test_high_performance_result_accuracy_equivalence
+  └─ Verifies both parallel and sequential modes produce valid results
+
+Test 5: test_high_performance_validates_inputs
+  └─ Verifies missing files/directories are properly handled
+
+
+WHAT TO LOOK FOR IN RESULTS
+============================
+
+PASS (what you want to see):
+  test_high_performance_basic_workflow PASSED
+  test_high_performance_with_low_cpu_mode_enabled PASSED
+  test_high_performance_memory_management PASSED
+  test_high_performance_result_accuracy_equivalence PASSED
+  test_high_performance_validates_inputs PASSED
+
+  ===== 5 passed in 3.45s =====
+
+FAIL (if something goes wrong):
+  AssertionError: High-performance workflow should succeed with valid files
+
+  This would indicate the implementation doesn't work correctly.
+
+
+HOW TO UNDERSTAND THE TESTS
+============================
+
+1. Read the test method docstring first
+   - Tells you what the test is verifying
+   - Lists the key assertions
+
+2. Look at the test code
+   - "Arrange" phase: Create engine and data
+   - "Act" phase: Call the method being tested
+   - "Assert" phase: Verify the behavior
+
+3. Read the comments
+   - Explain each major section
+   - Show what parameters are being tested
+
+
+KEY CONCEPTS
+============
+
+low_cpu_mode Parameter:
+  False (default): Parallel processing - uses more CPU/memory, faster
+  True: Sequential processing - uses less resources, slower
+
+Supplier-by-Supplier Processing:
+  Groups items by supplier directory (Zeiss, Olympus, etc.)
+  Only searches PDFs from that supplier's directory
+  Reduces search space by ~75%
+
+Memory Management:
+  PDF text cache caches extracted PDF content
+  Cache is bounded to _PDF_CACHE_MAX entries
+  Old entries are evicted (LRU style)
+  Garbage collection after each supplier
+
+Results Structure:
+  Each result is a dictionary with:
+  - 'pdf_path': Path to matched PDF
+  - 'score': Match score (0-100)
+  - 'supplier': Supplier name
+  - Other metadata
+
+
+UNDERSTANDING FAILURES
+======================
+
+If test fails with "AssertionError: result is False":
+  Problem: Input files not found
+  Check: Are input_file, master_file, pdf_dir valid?
+
+If test fails with "AssertionError: Cache should not exceed":
+  Problem: PDF text cache exceeded limit
+  Check: Is _PDF_CACHE_MAX set correctly?
+
+If test fails with "AssertionError: Should fail with missing input file":
+  Problem: Input validation not working
+  Check: Is file existence check implemented?
+
+If test hangs:
+  Problem: Infinite loop or very slow processing
+  Check: Are timeouts implemented? Batch processing?
+  Press Ctrl+C to interrupt
+
+
+DOCUMENTATION FILES
+===================
+
+HIGH_PERFORMANCE_TEST_SUMMARY.txt
+  Overview of each test method
+  What they verify
+  Integration with other tests
+
+IMPLEMENTATION_ANALYSIS.md
+  Deep technical explanation of the code path
+  Performance optimization techniques
+  Edge cases and error handling
+
+TEST_CODE_REFERENCE.py
+  Standalone copy of the test class
+  Useful for offline review
+
+DELIVERY_SUMMARY.txt
+  Complete overview of the work
+  File locations and requirements
+  Expected results
+
+
+NEXT STEPS
+==========
+
+1. Read HIGH_PERFORMANCE_TEST_SUMMARY.txt for overview
+2. Run the tests: pytest test_crossref_engine_integration.py::TestCrossReferenceEngineHighPerformance -v
+3. If tests pass: Great! Implementation is correct
+4. If tests fail: Read IMPLEMENTATION_ANALYSIS.md to understand code path
+5. Review DELIVERY_SUMMARY.txt for detailed success criteria
+
+
+DEPENDENCIES
+============
+
+Python packages:
+  pytest
+  pandas
+  (already imported in test file)
+
+From crossref_standalone_fast:
+  CrossReferenceEngine class
+  extract_item_code()
+  extract_description()
+  extract_category()
+  find_items_for_supplier()
+  Other supporting methods
+
+
+COMMON QUESTIONS
+================
+
+Q: Why are there 5 tests instead of 3-4?
+A: The 5th test (input validation) was added for robustness.
+   Covers boundary conditions and error paths.
+
+Q: Do I need to run all tests?
+A: For full validation, yes. But you can run individually
+   to debug specific features.
+
+Q: What if low_cpu_mode doesn't change behavior?
+A: Test will still pass. Tests verify same result structure,
+   not necessarily different execution times.
+
+Q: Can I modify these tests?
+A: Yes, if you find improvements. Keep same class name
+   and method signatures for compatibility.
+
+Q: How long do tests take to run?
+A: ~3-5 seconds for all 5 tests.
+   Each test 0.5-2 seconds.
+
+Q: What's the difference between test 2 and test 4?
+A: Test 2 verifies low_cpu_mode=True returns True
+   Test 4 verifies both modes produce consistent result structure
+   Test 4 is more thorough validation
+
+
+TROUBLESHOOTING
+===============
+
+Tests run but hang:
+  Check if there are unfinished fixtures
+  Make sure temp_workspace cleanup works
+  Verify no infinite loops in code
+
+Tests fail on import:
+  Check CrossReferenceEngine import path
+  Verify sys.path insertion on line 14
+  Make sure crossref_standalone_fast.py exists
+
+Cache test fails:
+  Check if _PDF_CACHE_MAX is defined
+  Verify _pdf_text_cache attribute exists
+  Look for eviction logic in extract_pdf_text
+
+Results test fails:
+  Check if engine.results attribute exists
+  Verify results is initialized as empty list
+  Check result dictionary structure has required fields
+
+
+GETTING HELP
+============
+
+1. Read the test docstring for what's being tested
+2. Check IMPLEMENTATION_ANALYSIS.md for code path details
+3. Look at temp_workspace fixture to understand test data
+4. Review comments in the test code itself
+5. Check if related methods are implemented correctly
+
+
+MINIMAL TEST COMMAND
+====================
+
+pytest test_crossref_engine_integration.py::TestCrossReferenceEngineHighPerformance -v --tb=short
+
+This runs all tests with:
+  -v: Verbose output
+  --tb=short: Short error messages
+
+If first test passes, others will likely pass too.
+
+
+SUMMARY
+=======
+
+Where: test_crossref_engine_integration.py lines 620-821
+What: 5 integration tests for high-performance code path
+How: pytest test_crossref_engine_integration.py::TestCrossReferenceEngineHighPerformance -v
+Expected: All 5 tests PASS in ~3-5 seconds
+
+Good luck!

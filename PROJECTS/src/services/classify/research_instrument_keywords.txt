@@ -1,4 +1,3 @@
-#403
 &45d
 -20
 -70
@@ -15,13 +14,20 @@
 2x/4x/10x
 3/5/7
 3/bag
+4-door
+4-dsp
+44/44r
+5'x2'x2
 5.83
+6-plus
+75x50
 96well0.1
 a28568
 aas
 accelerometer
 accurion_i4
 active
+acuson
 advia
 aeolus
 aeulos
@@ -43,10 +49,13 @@ barometer
 basic
 bath
 beacon
+bead
 being
+bill
 binoc
 bioreactor
 biosafety
+black
 blower
 blue
 body
@@ -63,16 +72,17 @@ calorimetry
 camera
 carboy
 cat#
+ce8120
 cell
 cell counter
 cell sorter
-cell-iq™
+cell-iqâ„¢
 celliq
 cells
 centf
 centrifuge
 centrifuge rotor
-chemidoc™
+chemidocâ„¢
 chroma
 chromatograph
 clamp
@@ -86,6 +96,7 @@ cold
 colorimeter
 conductivity meter
 confocal microscope
+contro
 controller
 copper
 cord
@@ -105,6 +116,7 @@ direct
 diret
 disk
 disp/waste
+diss
 dissolved oxygen
 dissolved oxygen meter
 distillation
@@ -123,14 +135,17 @@ elisa reader
 elite
 ella
 ellipsometer
+encore
 energy dispersive spectroscopy
 epiq
 evos
 exi600_lr
 expert
+f/imager
 fb4208
 fb4209
 fb4220
+fiber
 fisher
 fixed
 flint
@@ -138,6 +153,7 @@ flow cytometer
 flow meter
 flow sorter
 flowcytometer
+fluent
 fluorescence microscope
 fluorometer
 freeze dryer
@@ -164,13 +180,14 @@ hinged
 holds
 hose
 hplc
-hybez™
+hybezâ„¢
 hygrometer
 i100
 ic
 icp
 icp-aes
 icp-ms
+ignite
 image analyzer
 imager
 imaging
@@ -179,6 +196,7 @@ incl
 incubator
 incubator_vios
 inductively coupled plasma
+innova
 input
 insert
 interferometer
@@ -204,6 +222,7 @@ laminar flow hood
 laptop
 large
 laser
+lasers
 lc
 lc-ms
 legend
@@ -211,6 +230,7 @@ leica
 length
 lens
 light
+liquid
 liquid chromatograph
 listed
 load
@@ -220,6 +240,7 @@ ltsc
 luminometer
 lux meter
 lyophilizer
+lysis
 m3000
 ma95
 magnetic separator
@@ -243,6 +264,7 @@ models
 module
 moto
 motor
+mouse
 mp/chemidoc
 mt-1000/y51
 muffle furnace
@@ -255,15 +277,18 @@ nmr
 nomoto
 novac
 nuclear magnetic resonance
+nxgen
 octet
 ohmmeter
 oil bath
 opmi
+optic
 optics
 orbit
 oscilloscope
 other
 p31440
+pack
 packs
 particle counter
 payoff
@@ -284,6 +309,7 @@ potentiometer
 power
 pressure gauge
 prior
+pro-k
 probe
 promo
 pulse
@@ -315,10 +341,13 @@ rotor
 rtd
 rtpcr
 s41i
+s44i
 safety
+sale
 sample
 sand bath
 scales
+scan
 scanning electron microscope
 scanning tunneling microscope
 sem
@@ -329,7 +358,9 @@ sequencer
 series
 shaker
 shaker incubator
+shear
 shield
+single
 slide
 slider
 slides
@@ -344,14 +375,17 @@ spectrofluorometer
 spectrometer
 spo2
 spray dryer
+st4r
 st80i
 stage
 sticky
 stm
 storz
 strain gauge
+streamerÂ®
 stress
 studio
+suite
 supply
 system
 sz51;microscope
@@ -363,6 +397,7 @@ tem
 temp
 tempo
 tensiometer
+tera
 test
 thermal cycler
 thermistor
@@ -379,11 +414,13 @@ trace
 transilluminator
 transmission electron microscope
 tray
+trio
 tube furnace
 turbidimeter
 turbidity meter
 tx400
 u-an-2;analyzer
+u2-1
 ult
 ultra
 ultracentrifuge
@@ -393,16 +430,23 @@ vacuum gauge
 vacuum oven
 vacuum pump
 valco
+vc-10
 vendor
 vessel
 vf-2
 vibration meter
+vinyl
 vios
 viscometer
 visor
+vmax
 voltmeter
+volume
+vyntus
+w/attenuators
 w/esd,0.8-4x
 w/rotor
+wagd
 water
 water bath
 well

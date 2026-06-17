@@ -1,0 +1,5 @@
+=== SIMPLE TEST STARTED ===
+Python version: 3.13.3 (tags/v3.13.3:6280bb5, Apr  8 2025, 14:47:33) [MSC v.1943 64 bit (AMD64)]
+Current directory: C:\Projects\Crawler\PROJECTS
+
+Checking files:
