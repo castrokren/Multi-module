@@ -229,6 +229,7 @@ def run_scraper(cfg: dict) -> bool:
         batch_size               = scfg.get("batch_size", 10),
         skip_recent_sites        = scfg.get("skip_recent_sites", True),
         days_before_rescrape     = scfg.get("days_before_rescrape", 7),
+        allowlist_only           = scfg.get("allowlist_only", False),
     )
 
     t0 = time.time()
