@@ -21,7 +21,6 @@ class TestLoadSupplierPairs:
 
     def test_load_valid_supplier_excel(self, temp_output_dir):
         """Should load supplier list from valid Excel file."""
-        # Create test Excel file
         filepath = Path(temp_output_dir) / 'suppliers.xlsx'
         df = pd.DataFrame({
             'Supplier Name': ['Acme Corp', 'Tech Industries', 'Lab Equipment'],
@@ -33,7 +32,6 @@ class TestLoadSupplierPairs:
         })
         df.to_excel(filepath, index=False)
 
-        # Load it
         engine = ScraperEngine()
         pairs = engine._load_supplier_pairs(str(filepath))
 
@@ -44,15 +42,11 @@ class TestLoadSupplierPairs:
     def test_load_empty_supplier_list(self, temp_output_dir):
         """Should handle empty supplier list gracefully."""
         filepath = Path(temp_output_dir) / 'empty_suppliers.xlsx'
-        df = pd.DataFrame({
-            'Supplier Name': [],
-            'Website': []
-        })
+        df = pd.DataFrame({'Supplier Name': [], 'Website': []})
         df.to_excel(filepath, index=False)
 
         engine = ScraperEngine()
         pairs = engine._load_supplier_pairs(str(filepath))
-
         assert pairs == []
 
     def test_skip_invalid_urls(self, temp_output_dir):
@@ -60,18 +54,13 @@ class TestLoadSupplierPairs:
         filepath = Path(temp_output_dir) / 'mixed_suppliers.xlsx'
         df = pd.DataFrame({
             'Supplier Name': ['Valid Corp', 'Invalid Ltd', 'Another Corp'],
-            'Website': [
-                'https://valid.com',
-                'not-a-url',
-                'https://another.com'
-            ]
+            'Website': ['https://valid.com', 'not-a-url', 'https://another.com']
         })
         df.to_excel(filepath, index=False)
 
         engine = ScraperEngine()
         pairs = engine._load_supplier_pairs(str(filepath))
 
-        # Should only include valid URLs
         assert len(pairs) == 2
         names = [p[0] for p in pairs]
         assert 'Valid Corp' in names
@@ -83,14 +72,14 @@ class TestLoadSupplierPairs:
         filepath = Path(temp_output_dir) / 'no_website.xlsx'
         df = pd.DataFrame({
             'Supplier Name': ['Acme Corp'],
-            'URL': ['https://acme.com']  # Different column name
+            'Contact Email': ['555-1234']  # No website/url column at all
         })
         df.to_excel(filepath, index=False)
 
         engine = ScraperEngine()
         pairs = engine._load_supplier_pairs(str(filepath))
 
-        # Should return empty since Website column is missing
+        # Should return empty since no Website/URL column is present
         assert pairs == []
 
     def test_duplicate_suppliers(self, temp_output_dir):
@@ -104,8 +93,6 @@ class TestLoadSupplierPairs:
 
         engine = ScraperEngine()
         pairs = engine._load_supplier_pairs(str(filepath))
-
-        # Should include both (deduplication may be done elsewhere)
         assert len(pairs) == 2
 
     def test_whitespace_handling(self, temp_output_dir):
@@ -119,8 +106,6 @@ class TestLoadSupplierPairs:
 
         engine = ScraperEngine()
         pairs = engine._load_supplier_pairs(str(filepath))
-
-        # Should handle whitespace appropriately
         assert len(pairs) >= 1
 
     def test_null_values_ignored(self, temp_output_dir):
@@ -134,16 +119,12 @@ class TestLoadSupplierPairs:
 
         engine = ScraperEngine()
         pairs = engine._load_supplier_pairs(str(filepath))
-
-        # Should skip null entries
         assert len(pairs) <= 1
 
     def test_nonexistent_file(self):
         """Should handle nonexistent file gracefully."""
         engine = ScraperEngine()
         pairs = engine._load_supplier_pairs('/nonexistent/suppliers.xlsx')
-
-        # Should return empty list or raise appropriate error
         assert pairs == [] or pairs is None or isinstance(pairs, list)
 
 
@@ -172,13 +153,12 @@ class TestSupplierPairProcessing:
         filepath = Path(temp_output_dir) / 'suppliers.xlsx'
         df = pd.DataFrame({
             'Supplier Name': ['Acme', 'Tech'],
-            'Website': ['https://acme.com', 'techcorp.com']  # One without protocol
+            'Website': ['https://acme.com', 'techcorp.com']
         })
         df.to_excel(filepath, index=False)
 
         engine = ScraperEngine()
         pairs = engine._load_supplier_pairs(str(filepath))
 
-        # At least the valid HTTPS URL should be included
         urls = [p[1] for p in pairs]
         assert any('https://' in url for url in urls)
