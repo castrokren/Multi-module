@@ -404,15 +404,13 @@ def run_crossref(cfg: dict) -> bool:
     )
     elapsed = time.time() - t0
 
-    if success and engine.results:
+    if success:
         os.makedirs(results_dir, exist_ok=True)
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_file = os.path.join(results_dir, f"crossref_results_{ts}.xlsx")
         engine.export_results(output_file)
         logger.info("Cross-ref finished in %.0f s — %d match(es) saved to %s",
                     elapsed, len(engine.results), output_file)
-    elif success:
-        logger.info("Cross-ref finished in %.0f s — no matches found", elapsed)
     else:
         logger.error("Cross-ref failed after %.0f s", elapsed)
 

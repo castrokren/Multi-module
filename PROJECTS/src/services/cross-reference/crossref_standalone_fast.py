@@ -365,10 +365,11 @@ class PDFSmartFilter:
             r'.*documentation.*',
         ])
 
-        # Medium priority patterns (specs only, not datasheets)
+        # Medium priority patterns (specs, datasheets, technical data)
         self.medium_priority_patterns = _compile([
             r'.*specification.*',
             r'.*spec.*sheet.*',
+            r'.*datasheet.*',
             r'.*technical.*data.*',
             r'.*product.*info.*',
         ])
@@ -396,7 +397,6 @@ class PDFSmartFilter:
             r'.*price.*list.*',
             r'.*order.*form.*',
             r'.*color.*code.*parts.*list.*',
-            r'.*datasheet.*',
             r'.*self.*assessment.*',
         ])
     
