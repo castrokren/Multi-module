@@ -3,9 +3,9 @@
 
   "paths": {
     "supplier_excel":  "data/masterlist/updated_master_list.xlsx",
-    "pdf_dir":         "data/scraped-pdfs",
-    "input_excel_dir": "data/som-in",
-    "labeled_dir":     "data/som-in-labeled",
+    "pdf_dir":         "C:/Data/Crawler/output",
+    "input_excel_dir": "C:/Data/Crawler/input",
+    "labeled_dir":     "C:/Data/Crawler/labeled",
     "master_excel":    "data/masterlist/updated_master_list.xlsx",
     "master_list":     "data/masterlist/updated_master_list.xlsx",
     "results_dir":     "src/services/cross-reference/results"
@@ -40,7 +40,8 @@
     "verbose":                  false,
     "batch_size":               10,
     "skip_recent_sites":        true,
-    "days_before_rescrape":     7
+    "days_before_rescrape":     7,
+    "allowlist_only":           true
   },
 
   "classify": {
