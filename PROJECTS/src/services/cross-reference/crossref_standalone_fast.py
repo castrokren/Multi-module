@@ -905,10 +905,14 @@ class CrossReferenceEngine:
 
     def run_cross_reference_by_supplier(self, input_file, master_file, pdf_dir, threshold=60, test_mode=False, low_cpu_mode=False, clean_output=True):
         """Process suppliers one by one in alphabetical order - naturally completes when done."""
+        # Store config on instance for use in processing functions
+        self.low_cpu_mode = low_cpu_mode
+        self.test_mode = test_mode
+
         print("=== STARTING SUPPLIER-BY-SUPPLIER CROSS-REFERENCE ANALYSIS ===")
         print("🎯 Processing each supplier directory in alphabetical order")
         print("🏁 Will naturally complete when all supplier directories are processed")
-        
+
         if test_mode:
             print("🧪 TEST MODE ENABLED - Processing limited suppliers")
         
@@ -2045,17 +2049,17 @@ class CrossReferenceEngine:
             if hasattr(self, 'stop_analysis') and self.stop_analysis:
                 break
                 
-            print(f"        🔄 Sequential processing: PDF {i}/{total_pdfs}")
-            
+            print(f"        [SEQ] Sequential processing: PDF {i}/{total_pdfs}")
+
             try:
                 result = process_single_pdf((pdf_path, search_keywords, description, threshold))
                 if result:
                     matches.append(result)
-                    print(f"        ✅ MATCH! PDF {i}/{total_pdfs}: {os.path.basename(result['pdf_path'])}")
-                    
+                    print(f"        [MATCH] PDF {i}/{total_pdfs}: {os.path.basename(result['pdf_path'])}")
+
                 # Progress update
                 if i % 10 == 0 or i == total_pdfs:
-                    print(f"        📊 Progress: {i}/{total_pdfs} PDFs processed")
+                    print(f"        [PROGRESS] {i}/{total_pdfs} PDFs processed")
                     
                 # Memory cleanup every 50 PDFs
                 if i % 50 == 0:
@@ -2101,7 +2105,11 @@ class CrossReferenceEngine:
             
             # Process batch with timeout
             batch_start_time = time.time()
-            batch_matches = self.process_pdfs_parallel(batch_files, search_keywords, description, threshold)
+            # Use sequential processing if configured (avoids multiprocessing pickling issues)
+            if hasattr(self, 'low_cpu_mode') and self.low_cpu_mode:
+                batch_matches = self.process_pdfs_sequential(batch_files, search_keywords, description, threshold)
+            else:
+                batch_matches = self.process_pdfs_parallel(batch_files, search_keywords, description, threshold)
             
             # Check if batch took too long
             batch_time = time.time() - batch_start_time
