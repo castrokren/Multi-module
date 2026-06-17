@@ -266,8 +266,8 @@ def calculate_match_score_standalone(keywords, pdf_text, description, threshold=
         if not keywords or not pdf_text:
             return 0.0
         
-        # Content quality filter - reject low-content PDFs
-        if len(pdf_text.strip()) < 800:
+        # Content quality filter - reject very low-content PDFs
+        if len(pdf_text.strip()) < 200:
             return 0.0
         
         pdf_text_lower = pdf_text.lower()
@@ -280,9 +280,9 @@ def calculate_match_score_standalone(keywords, pdf_text, description, threshold=
         
         # Negative signals (marketing/noise)
         negative_patterns = [
-            'price', 'price-sheet', 'executive', 'summary', 'sustainability', 
-            'checklist', 'faq', 'one-pager', 'updated', 'brochure', 'catalog',
-            'flyer', 'poster', 'presentation', 'overview', 'intro'
+            'price', 'price-sheet', 'executive', 'summary', 'sustainability',
+            'checklist', 'faq', 'one-pager', 'updated', 'catalog',
+            'flyer', 'poster', 'presentation', 'intro'
         ]
         
         # Positive signals (technical docs)
