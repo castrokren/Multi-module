@@ -13,6 +13,7 @@ import re
 import pandas as pd
 from pathlib import Path
 from typing import Dict, List, Tuple
+import chardet
 
 
 # Pattern definitions for cleanup
@@ -31,6 +32,17 @@ SUPPLIER_SUFFIXES_TO_REMOVE = [
     " CORP", " CORPORATION", " INC", " LLC", " LTD", " CO",
     " SALES", " SERVICES", " SOLUTIONS",
 ]
+
+
+def detect_file_encoding(file_path: str) -> str:
+    """Detect file encoding using chardet."""
+    try:
+        with open(file_path, 'rb') as f:
+            raw = f.read(10000)  # Sample first 10KB
+        result = chardet.detect(raw)
+        return result.get('encoding', 'utf-8') or 'utf-8'
+    except Exception:
+        return 'utf-8'
 
 
 def detect_corrupted_names(df: pd.DataFrame, supplier_col: str = "Supplier Name") -> pd.DataFrame:
@@ -104,10 +116,10 @@ def clean_excel_file(excel_path: str, output_path: str = None,
                      supplier_col: str = "Supplier Name",
                      dry_run: bool = False) -> Dict:
     """
-    Clean an Excel file in place or to a new location.
+    Clean an Excel or CSV file in place or to a new location.
 
     Args:
-        excel_path: Path to Excel file to clean
+        excel_path: Path to Excel or CSV file to clean
         output_path: Where to save cleaned file (if None, overwrites input)
         supplier_col: Name of the supplier name column
         dry_run: If True, don't write changes, just report what would happen
@@ -115,11 +127,16 @@ def clean_excel_file(excel_path: str, output_path: str = None,
     Returns:
         Dict with cleaning statistics
     """
-    # Load Excel
+    # Load Excel or CSV
     if not Path(excel_path).exists():
-        raise FileNotFoundError(f"Excel file not found: {excel_path}")
+        raise FileNotFoundError(f"File not found: {excel_path}")
 
-    df = pd.read_excel(excel_path)
+    file_ext = Path(excel_path).suffix.lower()
+    if file_ext == ".csv":
+        encoding = detect_file_encoding(excel_path)
+        df = pd.read_csv(excel_path, skiprows=1, encoding=encoding)
+    else:
+        df = pd.read_excel(excel_path)
     print(f"[data_cleaner] Loaded: {excel_path} ({len(df)} rows)")
 
     # Check if supplier column exists
@@ -135,6 +152,12 @@ def clean_excel_file(excel_path: str, output_path: str = None,
         for _, row in issues.iterrows():
             print(f"  Row {row['index']}: {row['original']}")
             print(f"    Issues: {', '.join(row['issues'])}")
+
+    # Fix Unicode replacement characters in Item Description and comments
+    unicode_fix_cols = ["Item Description", "Req Header Comments", "Req Line Comments"]
+    for col in unicode_fix_cols:
+        if col in df.columns:
+            df[col] = df[col].astype(str).str.replace("�", "", regex=False)
 
     # Clean supplier names
     cleaned_count = 0
@@ -153,11 +176,11 @@ def clean_excel_file(excel_path: str, output_path: str = None,
     # Report changes
     print(f"\n[data_cleaner] Cleaned {cleaned_count} supplier names:")
     for idx, before, after in before_values:
-        print(f"  {before} → {after}")
+        print(f"  {before} -> {after}")
 
     # Save if not dry-run
     if dry_run:
-        print(f"\n[data_cleaner] DRY RUN — no changes written")
+        print(f"\n[data_cleaner] DRY RUN -- no changes written")
         return {
             "input_file": excel_path,
             "rows_total": len(df),
@@ -167,7 +190,11 @@ def clean_excel_file(excel_path: str, output_path: str = None,
         }
     else:
         save_path = output_path or excel_path
-        df.to_excel(save_path, index=False)
+        file_ext = Path(excel_path).suffix.lower()
+        if file_ext == ".csv":
+            df.to_csv(save_path, index=False, encoding='utf-8')
+        else:
+            df.to_excel(save_path, index=False)
         print(f"\n[data_cleaner] Saved cleaned file: {save_path}")
         return {
             "input_file": excel_path,
@@ -181,10 +208,10 @@ def clean_excel_file(excel_path: str, output_path: str = None,
 
 def clean_all_input_excels(input_dir: str, dry_run: bool = False) -> Dict:
     """
-    Clean all Excel files in the input directory.
+    Clean all Excel and CSV files in the input directory.
 
     Args:
-        input_dir: Directory containing Excel files to clean
+        input_dir: Directory containing Excel/CSV files to clean
         dry_run: If True, don't write changes
 
     Returns:
@@ -194,8 +221,8 @@ def clean_all_input_excels(input_dir: str, dry_run: bool = False) -> Dict:
     if not input_path.exists():
         raise FileNotFoundError(f"Input directory not found: {input_dir}")
 
-    excel_files = list(input_path.glob("*.xlsx")) + list(input_path.glob("*.xls"))
-    print(f"[data_cleaner] Found {len(excel_files)} Excel files in {input_dir}")
+    excel_files = list(input_path.glob("*.xlsx")) + list(input_path.glob("*.xls")) + list(input_path.glob("*.csv"))
+    print(f"[data_cleaner] Found {len(excel_files)} Excel/CSV files in {input_dir}")
 
     results = []
     total_cleaned = 0
@@ -209,7 +236,7 @@ def clean_all_input_excels(input_dir: str, dry_run: bool = False) -> Dict:
             total_cleaned += result["rows_cleaned"]
             total_rows += result["rows_total"]
         except Exception as e:
-            print(f"  ✗ Error: {e}")
+            print(f"  [ERROR] {e}")
             results.append({
                 "input_file": str(excel_file),
                 "status": "error",

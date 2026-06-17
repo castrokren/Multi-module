@@ -78,17 +78,23 @@ _PDF_BLOCKLIST = re.compile(
     r"|press[_\-\s]?release|newsletter|whitepaper|case[_\-\s]?study"
     r"|compliance|regulatory|iso[_\-\s]?cert|certificate[_\-\s]?of"
     r"|nda|agreement|contract|legal|disclaimer"
-    r"|map|directions|parking|exhibit[_\-\s]?hall)",
+    r"|map|directions|parking|exhibit[_\-\s]?hall"
+    r"|irs|tax|form[_\-\s]?(w2|1040|1099|941|940|990|k1|ct[_\-]?1)"
+    r"|w\-?2|1099|941|940|990|k\-?1|ct[_\-]?1"
+    r"|earnings|payroll|deduction|withhold|federal|state[_\-\s]?tax)",
     re.IGNORECASE,
 )
 
 _PDF_ALLOWLIST = re.compile(
     r"(catalog|catalogue|datasheet|data[_\-]?sheet|spec(ification)?s?"
-    r"|product[_\-]?(guide|list|range|brochure|sheet|info)"
+    r"|product[_\-]?(guide|list|range|brochure|sheet|info|overview)"
     r"|price[_\-]?list|pricelist|part[_\-]?list|parts[_\-]?list"
-    r"|technical|install(ation)?|manual|guide|brochure"
+    r"|technical|install(ation)?|manual|guide|brochure|ifu|instructions?"
     r"|accessory|accessories|selection[_\-]?guide"
-    r"|flyer|bulletin|literature|resource)",
+    r"|flyer|bulletin|literature|resource|quickstart|quick[_\-]?start"
+    r"|user[_\-]?guide|reference[_\-]?guide|operator[_\-]?manual"
+    r"|service[_\-]?manual|maintenance|setup|configuration"
+    r"|protocol|application[_\-]?note|app[_\-]?note|tech[_\-]?note)",
     re.IGNORECASE,
 )
 

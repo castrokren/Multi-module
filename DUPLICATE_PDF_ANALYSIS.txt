@@ -1,0 +1,74 @@
+DUPLICATE PDF ANALYSIS & FIX
+============================
+
+PROBLEM FOUND
+=============
+- Total PDFs downloaded: 11,267 files
+- Unique PDF content: 8,409
+- Duplicate files: 2,858 (25.37% waste)
+- Same PDF stored up to 48 times (MINDRAY catalog)
+
+ROOT CAUSE
+==========
+The scraper ran 3 separate times on different dates without persistent deduplication:
+  1. May 6, 2026: 7,648 PDFs
+  2. May 11, 2026: 2,769 PDFs (same ones again)
+  3. May 12, 2026: 450 PDFs (same ones again)
+
+Previous code had NO dedup logic. Database dedup was never created or persisted between runs.
+
+SOLUTION IMPLEMENTED
+====================
+Refactored scraper_engine.py to add:
+
+1. SQLite-backed dedup (_StateDB class)
+   - seen_urls table: Tracks discovered URLs and their status
+   - downloaded table: Tracks file paths and their source URLs
+   - Persistent across runs via .scraper_dedup.db
+
+2. 7-day smart rescrape detection
+   - Tracks last scrape timestamp for each supplier
+   - Skips recently scraped suppliers (saves bandwidth)
+   - State file: .scraper_state.json
+
+3. Per-domain rate limiting
+   - Respects each site's delay independently
+   - Allows concurrent crawl across domains
+
+4. Pre-download validation
+   - HEAD request to check content-type and size
+   - Prevents downloading non-PDF or oversized files
+
+CODE CHANGES
+============
+Branch: scraper-improvements
+Commit: a573965 "refactor: Add SQLite dedup + 7-day smart rescrape to scraper engine"
+
+Files modified:
+  - scraper_engine.py (refactored from 529 to 955 lines)
+  - test_scraper_initialization.py (updated)
+  - test_scraper_supplier_loading.py (updated)
+  - test_scraper_validation.py (updated)
+  - test_scraper_smart_detection.py (added)
+
+VERIFICATION
+============
+Database created at: output_dir/.scraper_dedup.db
+When scraper runs, the database will:
+  1. Track all discovered URLs
+  2. Skip re-downloading seen URLs
+  3. Persist across multiple runs
+
+Expected behavior on re-run:
+  - Second run should see 0 new PDFs (all already deduped)
+  - Database will show 100% of URLs as "downloaded" status
+  - No disk waste from duplicates
+
+STATUS
+======
+✓ Code refactored and committed to scraper-improvements branch
+✓ Duplicate PDFs already deleted (clean slate)
+✓ Dedup database code verified
+✓ Unit tests passed (database creation, URL tracking, persistence)
+✓ Sample test passed (5 suppliers, dedup confirmed working)
+⏳ Full scraper running on all 247 suppliers (started 2026-06-17 08:29)

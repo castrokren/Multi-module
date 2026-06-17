@@ -1,5 +1,6 @@
 1.00
 18-4
+24x2ml
 3.10
 above
 access
@@ -30,8 +31,10 @@ box
 bug fix
 bundle
 cat#
+catalog#
 cent
 centf
+centrifuge*fa
 chrome
 ci/cd
 citrix
@@ -57,20 +60,25 @@ dlic
 docker
 documentation
 docx
+drawer
 drawer,keyboar
+drive
 dropbox
+dual
 dynamics
 e264
 echo
 eclipse
 edge
 elasticsearch
+elite
 email
 encryption
 enhancement
 entry
 excel
 extension
+f/module
 fa-24x
 feature
 firefox
@@ -97,6 +105,8 @@ hs1/
 hyper-v
 iaas
 illustrator
+image
+image!
 imagej
 imaris
 improvement
@@ -124,6 +134,9 @@ licence
 license
 linear
 linux
+list
+lite
+lleap
 logging
 lumpl
 macos
@@ -142,6 +155,8 @@ mouse
 mtbf
 mttr
 mysql
+natus
+ncare
 needle
 netbeans
 neurolucida
@@ -166,17 +181,20 @@ peoplesoft
 performance
 perpetual
 photoshop
+plug
 plugin
 postgresql
 power bi
 powerpoint
 pptx
 premiere
+price
 prism
 probe
 program
 project
 prometheus
+promo
 python
 qlik
 r

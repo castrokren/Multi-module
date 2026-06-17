@@ -103,17 +103,17 @@ PSUTIL_AVAILABLE = False
 try:
     import psutil  # type: ignore
     PSUTIL_AVAILABLE = True
-    print("✅ psutil imported successfully - enhanced system monitoring available")
+    print("[OK] psutil imported successfully - enhanced system monitoring available")
 except (ImportError, ModuleNotFoundError):
     PSUTIL_AVAILABLE = False
-    print("⚠️ psutil not available - using fallback memory detection")
-    print("💡 To install psutil: pip install psutil")
-    print("💡 psutil provides better system resource monitoring for performance optimization")
+    print("[WARN] psutil not available - using fallback memory detection")
+    print("[INFO] To install psutil: pip install psutil")
+    print("[INFO] psutil provides better system resource monitoring for performance optimization")
 except Exception as e:
     PSUTIL_AVAILABLE = False
-    print(f"⚠️ psutil import failed: {e} - using fallback memory detection")
-    print("💡 To install psutil: pip install psutil")
-    print("💡 psutil provides better system resource monitoring for performance optimization")
+    print(f"[WARN] psutil import failed: {e} - using fallback memory detection")
+    print("[INFO] To install psutil: pip install psutil")
+    print("[INFO] psutil provides better system resource monitoring for performance optimization")
 
 # VV LOGGING: Add very verbose logging
 def vv_log(message):
@@ -540,10 +540,10 @@ class CrossReferenceEngine:
                     
                     if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(memory_status)):
                         memory_gb = memory_status.ullTotalPhys / (1024**3)
-                        print(f"        ✅ Windows memory detection: {memory_gb:.1f}GB")
+                        print(f"        [OK] Windows memory detection: {memory_gb:.1f}GB")
                         return memory_gb
                 except Exception as e:
-                    print(f"        ⚠️ Windows memory detection failed: {e}")
+                    print(f"        [WARN] Windows memory detection failed: {e}")
             
             # Try to get memory info from /proc/meminfo on Linux
             elif platform.system() == "Linux":
