@@ -384,7 +384,6 @@ class PDFSmartFilter:
             r'.*cad.*',
             r'.*schematic.*',
             r'.*reprint.*',
-            r'.*brochure.*',
             r'.*flyer.*',
             r'.*poster.*',
             r'.*advertisement.*',
@@ -446,10 +445,19 @@ class PDFSmartFilter:
             if keyword in filename_lower:
                 return 50.0  # Positive score for high priority
 
+        # Medium priority patterns — return neutral score (allow text matching)
+        medium_priority_keywords = [
+            'brochure', 'product brief', 'overview'
+        ]
+
+        for keyword in medium_priority_keywords:
+            if keyword in filename_lower:
+                return 0.0  # Neutral score for medium priority
+
         # Low priority patterns — return negative score
         low_priority_keywords = [
             'invoice', 'receipt', 'order', 'price list', 'catalog',
-            'drawing', 'dwg', 'cad', 'schematic', 'reprint', 'brochure',
+            'drawing', 'dwg', 'cad', 'schematic', 'reprint',
             'flyer', 'poster', 'advertisement', 'marketing', 'sales',
             'part list', 'color code'
         ]
