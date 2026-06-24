@@ -162,10 +162,30 @@ def filter_and_classify(input_file: str, output_dir: str = None, hw_kw: set = No
                 df_filtered.at[curr_idx, "Type"] = "Instrument"
                 rule_a_count += 1
 
+    # PHASE 2B: Rule C - Bundle Analysis
+    # For Unknown items: extract first/dominant item from bundled descriptions
+    # ponytail: simple heuristic—split on common delimiters, take first meaningful segment
+    rule_c_count = 0
+    for idx in df_filtered[df_filtered["Type"] == "Unknown"].index:
+        desc = str(df_filtered.at[idx, "Item Description"]).strip()
+        # Try to extract first item (before semicolon, comma, or slash)
+        for delim in [';', ',', '/']:
+            if delim in desc:
+                first_part = desc.split(delim)[0].strip()
+                # Only reclassify if first part is substantively different and not product ID
+                if len(first_part) > 5 and not first_part[0].isdigit():
+                    # Re-classify the extracted segment
+                    classification = classify_item("", first_part, hw_kw, sw_kw, ni_kw)
+                    if classification != "Unknown":
+                        df_filtered.at[idx, "Type"] = classification
+                        rule_c_count += 1
+                break
+
     # Count types
     type_counts = df_filtered["Type"].value_counts().to_dict()
     print(f"[v3] Results: {type_counts}")
     print(f"[v3] Rule A (Prior Context): {rule_a_count} items reclassified")
+    print(f"[v3] Rule C (Bundle Analysis): {rule_c_count} items reclassified")
 
     # Save to output
     output_file = output_path / (input_path.stem + "_classified_v3.xlsx")
