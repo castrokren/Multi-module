@@ -244,49 +244,33 @@ def run_scraper(cfg: dict) -> bool:
 
 
 def run_classify(cfg: dict) -> bool:
-    """Stage 2: classify every Excel file in the input directory."""
+    """Stage 2: classify every Excel file in the input directory (v3: Rules A, B, C)."""
     logger.info("=" * 60)
-    logger.info("STAGE 2 — CLASSIFY")
+    logger.info("STAGE 2 — CLASSIFY (v3: Prior Context + Supplier Metadata + Bundle Analysis)")
     logger.info("=" * 60)
 
     paths = cfg.get("paths", {})
-    ccfg  = cfg.get("classify", {})
-
     input_dir   = paths["input_excel_dir"]
     labeled_dir = paths["labeled_dir"]
-    hw_kw = ccfg.get("hw_keywords_file", str(PROJECT_ROOT / "src/services/classify/research_instrument_keywords.txt"))
-    sw_kw = ccfg.get("sw_keywords_file", str(PROJECT_ROOT / "src/services/classify/software_keywords.txt"))
-    ni_kw = ccfg.get("ni_keywords_file", str(PROJECT_ROOT / "src/services/classify/non_instrument_keywords.txt"))
 
-    logger.info("Input dir     : %s", input_dir)
-    logger.info("Output dir    : %s", labeled_dir)
-    logger.info("HW keywords   : %s", hw_kw)
-    logger.info("SW keywords   : %s", sw_kw)
-    logger.info("NI keywords   : %s", ni_kw)
+    logger.info("Input dir  : %s", input_dir)
+    logger.info("Output dir : %s", labeled_dir)
+    logger.info("Rules: A (Prior Context) + B (Supplier Metadata) + C (Bundle Analysis)")
 
     try:
-        AdaptiveExcelProcessor = _import_from_file(
-            "adaptive_excel_processor",
-            SERVICES_ROOT / "classify" / "adaptive_excel_processor.py",
-            "AdaptiveExcelProcessor",
+        column_filter_and_classify = _import_from_file(
+            "column_filter_and_classify_v3",
+            SERVICES_ROOT / "data-cleaning" / "column_filter_and_classify_v3.py",
+            "process_all_inputs",
         )
     except ImportError as exc:
-        logger.error("Cannot import AdaptiveExcelProcessor: %s", exc)
+        logger.error("Cannot import column_filter_and_classify_v3: %s", exc)
         return False
 
-    processor = AdaptiveExcelProcessor(
-        hw_keywords_file     = hw_kw,
-        sw_keywords_file     = sw_kw,
-        ni_keywords_file     = ni_kw,
-        output_dir           = labeled_dir,
-        learning_mode        = ccfg.get("learning_mode", True),
-        min_occurrences      = ccfg.get("min_occurrences", 5),
-        confidence_threshold = ccfg.get("confidence_threshold", 0.7),
-    )
-
     t0 = time.time()
-    count = processor.process_directory(input_dir)
+    result = column_filter_and_classify(input_dir, labeled_dir)
     elapsed = time.time() - t0
+    count = len(result.get("results", []))
 
     logger.info("Classify finished in %.0f s — %d file(s) processed", elapsed, count)
     return count > 0 or True   # don't fail the pipeline if dir was empty
