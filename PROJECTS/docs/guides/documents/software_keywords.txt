@@ -261,3 +261,14 @@ feature
 enhancement
 improvement
 optimization
+
+# Medical Equipment Systems (NEW)
+affiniti
+philips system
+mediajet
+naeotom
+manoscan
+siemens medical
+ge healthcare
+imaging software
+diagnostic software

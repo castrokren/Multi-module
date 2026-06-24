@@ -218,3 +218,46 @@ thermometer
 thermostat
 controller
 
+# Medical Imaging Equipment (NEW)
+ultrasound
+ultrasound system
+transducer
+array probe
+linear probe
+x-ray
+x-ray system
+radiography
+ct scanner
+manometry probe
+esophageal probe
+manometry
+ecg system
+cardiac monitor
+
+# Specialized Lab Equipment (NEW)
+sample loop
+chromatography accessory
+sample injection
+hplc connector
+fingertight connector
+peek tubing
+fep tubing
+
+# Medical Training Equipment (NEW)
+medical trainer
+simulation trainer
+anatomical model
+emergency trainer
+
+# Power & Environmental Systems (NEW)
+ups system
+uninterruptible power system
+power management
+
+# Transducers & Sensors (NEW)
+acoustic transducer
+pressure transducer
+temperature transducer
+air sensor
+sensor probe
+
