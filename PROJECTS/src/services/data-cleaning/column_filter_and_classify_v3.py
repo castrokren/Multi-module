@@ -9,6 +9,7 @@ Hybrid Column Filtering + Classification (v3)
 import pandas as pd
 from pathlib import Path
 import sys
+import json
 
 COLUMN_MAP = {
     "Req ID": "B",
@@ -19,6 +20,26 @@ COLUMN_MAP = {
 }
 
 KEYWORD_DIR = Path(__file__).parent.parent / "classify"
+
+
+def load_supplier_classification():
+    """Load supplier classification database for Rule B (Metadata Context)."""
+    # Try multiple paths: relative to script, or from project root
+    possible_paths = [
+        Path(__file__).parent.parent.parent.parent / "docs" / "references" / "supplier_classification.json",
+        Path(__file__).parent.parent.parent / "docs" / "references" / "supplier_classification.json",
+        Path("docs/references/supplier_classification.json"),
+    ]
+
+    for db_file in possible_paths:
+        if db_file.exists():
+            try:
+                with open(db_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except Exception as e:
+                print(f"[v3] Warning: Error loading supplier DB from {db_file}: {e}")
+
+    return {}
 
 
 def load_and_clean_keywords():
@@ -92,7 +113,7 @@ def classify_item(req_line: str, item_desc: str, hw_kw: set, sw_kw: set, ni_kw: 
 
 
 def filter_and_classify(input_file: str, output_dir: str = None, hw_kw: set = None,
-                       sw_kw: set = None, ni_kw: set = None) -> dict:
+                       sw_kw: set = None, ni_kw: set = None, supplier_db: dict = None) -> dict:
     """
     Read Excel, filter columns, classify with improved logic, output formatted Excel.
     """
@@ -106,6 +127,10 @@ def filter_and_classify(input_file: str, output_dir: str = None, hw_kw: set = No
     # Load keyword sets once
     if hw_kw is None:
         hw_kw, sw_kw, ni_kw = load_and_clean_keywords()
+
+    # Load supplier classification DB once
+    if supplier_db is None:
+        supplier_db = load_supplier_classification()
 
     # Load file
     file_ext = input_path.suffix.lower()
@@ -181,10 +206,27 @@ def filter_and_classify(input_file: str, output_dir: str = None, hw_kw: set = No
                         rule_c_count += 1
                 break
 
+    # PHASE 3: Rule B - Metadata Context (Supplier Classification)
+    # For Unknown items: if supplier is classified as equipment distributor → reclassify as Instrument
+    rule_b_count = 0
+    unknown_before_b = len(df_filtered[df_filtered["Type"] == "Unknown"])
+    if supplier_db:
+        for idx in df_filtered[df_filtered["Type"] == "Unknown"].index:
+            supplier = df_filtered.at[idx, "Supplier Name"]
+            supplier_type = supplier_db.get(supplier, "unknown")
+            # Reclassify Unknown from equipment suppliers to Instrument
+            if supplier_type in ["lab_equipment", "medical_equipment", "research_equipment"]:
+                df_filtered.at[idx, "Type"] = "Instrument"
+                rule_b_count += 1
+    unknown_after_b = len(df_filtered[df_filtered["Type"] == "Unknown"])
+    if rule_b_count == 0:
+        print(f"[v3] Rule B: supplier_db has {len(supplier_db)} entries, {unknown_before_b} Unknown items")
+
     # Count types
     type_counts = df_filtered["Type"].value_counts().to_dict()
     print(f"[v3] Results: {type_counts}")
     print(f"[v3] Rule A (Prior Context): {rule_a_count} items reclassified")
+    print(f"[v3] Rule B (Supplier Metadata): {rule_b_count} items reclassified")
     print(f"[v3] Rule C (Bundle Analysis): {rule_c_count} items reclassified")
 
     # Save to output
@@ -212,13 +254,14 @@ def process_all_inputs(input_dir: str = None, output_dir: str = None) -> dict:
     files = list(input_path.glob("*.xlsx")) + list(input_path.glob("*.xls")) + list(input_path.glob("*.csv"))
     print(f"[v3] Found {len(files)} files")
 
-    # Load keywords once
+    # Load keywords and supplier DB once
     hw_kw, sw_kw, ni_kw = load_and_clean_keywords()
+    supplier_db = load_supplier_classification()
 
     results = []
     for file in files:
         try:
-            result = filter_and_classify(str(file), str(output_path), hw_kw, sw_kw, ni_kw)
+            result = filter_and_classify(str(file), str(output_path), hw_kw, sw_kw, ni_kw, supplier_db)
             results.append(result)
         except Exception as e:
             print(f"  [ERROR] {file.name}: {e}")
