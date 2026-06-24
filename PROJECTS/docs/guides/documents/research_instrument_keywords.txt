@@ -261,3 +261,19 @@ temperature transducer
 air sensor
 sensor probe
 
+# Phase 2 Research Equipment Keywords (NEW - Conflict-free)
+analysis probe
+biosafety cabinet
+calibration kit
+control software
+control unit
+data logger
+digitizer
+interface module
+measurement probe
+measurement software
+power regulator
+reference standard
+stop plug
+system module
+
