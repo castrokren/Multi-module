@@ -149,9 +149,23 @@ def filter_and_classify(input_file: str, output_dir: str = None, hw_kw: set = No
 
     df_filtered["Type"] = classifications
 
+    # PHASE 2B: Rule A - Prior Context
+    # If prior item in same quote (Req ID) is Instrument + current is Unknown → reclassify as Instrument
+    rule_a_count = 0
+    df_filtered = df_filtered.reset_index(drop=True)
+    for req_id in df_filtered["Req ID"].unique():
+        group_indices = df_filtered[df_filtered["Req ID"] == req_id].index.tolist()
+        for i in range(1, len(group_indices)):
+            curr_idx = group_indices[i]
+            prev_idx = group_indices[i-1]
+            if df_filtered.at[curr_idx, "Type"] == "Unknown" and df_filtered.at[prev_idx, "Type"] == "Instrument":
+                df_filtered.at[curr_idx, "Type"] = "Instrument"
+                rule_a_count += 1
+
     # Count types
     type_counts = df_filtered["Type"].value_counts().to_dict()
     print(f"[v3] Results: {type_counts}")
+    print(f"[v3] Rule A (Prior Context): {rule_a_count} items reclassified")
 
     # Save to output
     output_file = output_path / (input_path.stem + "_classified_v3.xlsx")

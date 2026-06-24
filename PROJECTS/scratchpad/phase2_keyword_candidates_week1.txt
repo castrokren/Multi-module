@@ -1,0 +1,133 @@
+# Phase 2 Keyword Candidates - Research Equipment Focus
+# Extracted from 1,134 Unknown items (Week 1 Day 3-4)
+# Created: 2026-06-23
+
+# ============================================================================
+# RESEARCH INSTRUMENT KEYWORDS - Phase 2 Additions
+# ============================================================================
+
+# HIGH FREQUENCY TERMS (20+ occurrences in Unknown items)
+# These are strong candidates for classification improvement
+
+## Medical/Analytical Imaging (45+ occurrences of ultrasound, related equipment)
+ultrasound
+ultrasound system
+array probe
+linear probe
+transducer
+acoustic transducer
+ecg system
+cardiac monitor
+manometry probe
+esophageal probe
+
+## Lab Equipment - Sample Handling (18-23 occurrences of sample, loop, injection)
+sample loop
+sample injection
+hplc connector
+peek tubing
+fep tubing
+fingertight connector
+stop plug
+
+## Power Systems (14-28 occurrences, includes UPS, power cords)
+ups system
+uninterruptible power supply
+power supply
+power management
+power cord
+transformer
+power regulator
+
+## Sensors & Transducers (14-34 occurrences of probe, sensor, transducer)
+pressure transducer
+temperature transducer
+air sensor
+humidity sensor
+sensor probe
+rotor (already exists, but confirm in list)
+
+## MEDIUM FREQUENCY TERMS (8-15 occurrences)
+# These appear frequently enough to warrant inclusion
+
+## Equipment Systems
+system module
+control unit
+interface module
+data logger
+digitizer
+
+## Laboratory Specific
+chromatography accessory
+calibration kit
+reference standard
+measurement probe
+analysis probe
+
+## Environmental/Safety Equipment
+biosafety cabinet
+fume hood
+laminar flow hood
+clean bench
+
+## Specific Equipment Types
+oscilloscope
+multimeter
+flow meter
+viscometer
+rheometer
+spectrometer
+chromatograph
+
+# ============================================================================
+# SOFTWARE KEYWORDS - Phase 2 Additions
+# ============================================================================
+
+# Brand/System Names appearing in Unknown items (equipment software/systems)
+affiniti
+philips system
+mediajet
+manoscan
+naeotom
+ge healthcare
+siemens medical
+
+# Software-specific
+imaging software
+diagnostic software
+control software
+measurement software
+analysis software
+
+# ============================================================================
+# NOTES & VALIDATION CHECKLIST
+# ============================================================================
+
+# Validation Status:
+# - [OK] No duplicates with Phase 1 keywords (to be verified)
+# - [OK] Multi-word keywords preferred for specificity
+# - [OK] Research equipment focus (non-medical items noted)
+# - [PENDING] Domain expert review for accuracy
+
+# Items to Review:
+# 1. Generic terms that might be too broad:
+#    - "system module" (module is common)
+#    - "power cord" (too generic?)
+#    - "probe" (context-dependent, prefer qualified: "acoustic transducer", "pressure transducer")
+#
+# 2. Brand names (affiniti, philips, etc.):
+#    - Consider if should be Software or Instrument category
+#    - "affiniti" typically pairs with "ultrasound" (medical equipment, Phase 1)
+#    - May need to verify current Phase 1 includes these
+#
+# 3. Uncategorized items (857/1134 = 75%):
+#    - Large set of vague descriptions ("equipment", "system", "unit")
+#    - Phase 2b context rules should address these
+#    - Cannot be resolved by keywords alone
+
+# Estimated Impact:
+# - Keywords extracted: ~50-60 terms above
+# - After Phase 1 merge: ~310-320 total keywords
+# - Projected reclassification: 200-300 of 1,134 Unknown items (~18-26%)
+# - Context rules (Phase 2b) needed for remaining vague descriptions
+
