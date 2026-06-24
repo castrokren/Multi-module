@@ -209,7 +209,6 @@ def filter_and_classify(input_file: str, output_dir: str = None, hw_kw: set = No
     # PHASE 3: Rule B - Metadata Context (Supplier Classification)
     # For Unknown items: if supplier is classified as equipment distributor → reclassify as Instrument
     rule_b_count = 0
-    unknown_before_b = len(df_filtered[df_filtered["Type"] == "Unknown"])
     if supplier_db:
         for idx in df_filtered[df_filtered["Type"] == "Unknown"].index:
             supplier = df_filtered.at[idx, "Supplier Name"]
@@ -218,9 +217,6 @@ def filter_and_classify(input_file: str, output_dir: str = None, hw_kw: set = No
             if supplier_type in ["lab_equipment", "medical_equipment", "research_equipment"]:
                 df_filtered.at[idx, "Type"] = "Instrument"
                 rule_b_count += 1
-    unknown_after_b = len(df_filtered[df_filtered["Type"] == "Unknown"])
-    if rule_b_count == 0:
-        print(f"[v3] Rule B: supplier_db has {len(supplier_db)} entries, {unknown_before_b} Unknown items")
 
     # Count types
     type_counts = df_filtered["Type"].value_counts().to_dict()
