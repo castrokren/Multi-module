@@ -80,9 +80,9 @@ for supplier in suppliers_with_pdfs[:5]:
             print(f"    Text length: {len(text)} chars")
             print(f"    Keywords matched: {len(matched)}/{len(keywords)}")
             print(f"    Keyword score: {keyword_score:.1f}")
-            print(f"    Similarity: {similarity:.2f} → {similarity_score:.1f}")
+            print(f"    Similarity: {similarity:.2f} -> {similarity_score:.1f}")
             print(f"    TOTAL SCORE: {total:.1f} (threshold: 30)")
-            print(f"    RESULT: {'✅ MATCH' if total >= 30 else '❌ NO MATCH'}")
+            print(f"    RESULT: {'✅ MATCH' if total >= 30 else '[ERROR] NO MATCH'}")
 
         except Exception as e:
             print(f"  {pdf_path.name}: ERROR - {e}")

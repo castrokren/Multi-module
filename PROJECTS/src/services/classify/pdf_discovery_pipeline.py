@@ -31,7 +31,7 @@ class PDFDiscoveryPipeline:
         """
         Args:
             classified_file: Path to classified Excel file with TYPE and Supplier Name columns
-            masterlist_file: Path to masterlist Excel file mapping Supplier Name → Website
+            masterlist_file: Path to masterlist Excel file mapping Supplier Name -> Website
             output_dir: Where to save PDFs and converted documents
             scraper_engine_path: Path to ScraperEngine module
         """
@@ -191,7 +191,7 @@ class PDFDiscoveryPipeline:
     def create_index(self, text_dir: Path) -> Path:
         """
         Create index mapping classified items to their documentation.
-        Maps item → supplier → documents found
+        Maps item -> supplier -> documents found
         """
         logger.info("Creating document index...")
 

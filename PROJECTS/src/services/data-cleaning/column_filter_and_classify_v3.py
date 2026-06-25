@@ -175,7 +175,7 @@ def filter_and_classify(input_file: str, output_dir: str = None, hw_kw: set = No
     df_filtered["Type"] = classifications
 
     # PHASE 2B: Rule A - Prior Context
-    # If prior item in same quote (Req ID) is Instrument + current is Unknown → reclassify as Instrument
+    # If prior item in same quote (Req ID) is Instrument + current is Unknown -> reclassify as Instrument
     rule_a_count = 0
     df_filtered = df_filtered.reset_index(drop=True)
     for req_id in df_filtered["Req ID"].unique():
@@ -189,7 +189,7 @@ def filter_and_classify(input_file: str, output_dir: str = None, hw_kw: set = No
 
     # PHASE 2B: Rule C - Bundle Analysis
     # For Unknown items: extract first/dominant item from bundled descriptions
-    # ponytail: simple heuristic—split on common delimiters, take first meaningful segment
+    # ponytail: simple heuristic-split on common delimiters, take first meaningful segment
     rule_c_count = 0
     for idx in df_filtered[df_filtered["Type"] == "Unknown"].index:
         desc = str(df_filtered.at[idx, "Item Description"]).strip()
@@ -207,7 +207,7 @@ def filter_and_classify(input_file: str, output_dir: str = None, hw_kw: set = No
                 break
 
     # PHASE 3: Rule B - Metadata Context (Supplier Classification)
-    # For Unknown items: if supplier is classified as equipment distributor → reclassify as Instrument
+    # For Unknown items: if supplier is classified as equipment distributor -> reclassify as Instrument
     rule_b_count = 0
     if supplier_db:
         for idx in df_filtered[df_filtered["Type"] == "Unknown"].index:
