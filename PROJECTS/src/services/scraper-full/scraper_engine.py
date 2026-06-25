@@ -765,7 +765,7 @@ class ScraperEngine:
                     href = (loc.text or "").strip()
                     if href.lower().endswith(".pdf"):
                         pdf_urls.append(href)
-                logger.info("[%s] Sitemap %s → %d PDF(s)", domain, sitemap_url, len(pdf_urls))
+                logger.info("[%s] Sitemap %s -> %d PDF(s)", domain, sitemap_url, len(pdf_urls))
             except Exception as exc:
                 logger.warning("[%s] Failed to parse sitemap %s: %s", domain, sitemap_url, exc)
 
