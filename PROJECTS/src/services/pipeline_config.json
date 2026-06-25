@@ -13,9 +13,9 @@
 
   "pipeline": {
     "run_data_cleaner":         true,
-    "run_scraper":              true,
+    "run_scraper":              false,
     "run_classify":             true,
-    "run_supplier_resolution":  true,
+    "run_supplier_resolution":  false,
     "run_crossref":             true,
     "stop_on_failure": false
   },
