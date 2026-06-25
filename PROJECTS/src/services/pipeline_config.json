@@ -21,7 +21,7 @@
   },
 
   "supplier_resolution": {
-    "enabled":                  true,
+    "enabled":                  false,
     "confidence_threshold":     70,
     "search_delay_seconds":     1.5,
     "search_timeout_seconds":   10,

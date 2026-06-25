@@ -281,6 +281,11 @@ def run_supplier_resolution(cfg: dict) -> bool:
     paths = cfg.get("paths", {})
     res_cfg = cfg.get("supplier_resolution", {})
 
+    # Check if supplier resolution is disabled
+    if not res_cfg.get("enabled", True):
+        logger.info("Supplier resolution disabled in config—skipping")
+        return True
+
     # Build the cfg dict the resolver expects
     resolver_cfg = {
         "master_list":          paths.get("master_list") or paths.get("master_excel", ""),
