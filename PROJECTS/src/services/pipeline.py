@@ -218,15 +218,11 @@ def run_scraper(cfg: dict) -> bool:
         return False
 
     engine = ScraperEngine(
-        max_concurrent           = scfg.get("max_concurrent", 3),
-        request_delay            = scfg.get("request_delay", 2.0),
         page_timeout             = scfg.get("page_timeout", 15),
-        max_pages_per_site       = scfg.get("max_pages_per_site", 50),
         max_pdf_size_mb          = scfg.get("max_pdf_size_mb", 100),
         min_pdf_size_bytes       = scfg.get("min_pdf_size_bytes", 512),
         strict_content_validation= scfg.get("strict_content_validation", False),
         verbose                  = scfg.get("verbose", False),
-        batch_size               = scfg.get("batch_size", 10),
         skip_recent_sites        = scfg.get("skip_recent_sites", True),
         days_before_rescrape     = scfg.get("days_before_rescrape", 7),
         allowlist_only           = scfg.get("allowlist_only", False),

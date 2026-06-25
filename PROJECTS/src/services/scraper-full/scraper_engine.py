@@ -67,6 +67,66 @@ except ImportError:
     _HAS_WEB_SEARCHER = False
 
 # ---------------------------------------------------------------------------
+# Keyword-based filtering + Camofox integration
+# ---------------------------------------------------------------------------
+_HARDWARE_KEYWORDS_FILE = r"C:\Data\Crawler\labeled\hardware_keywords_ACTIVE.txt"
+_SOFTWARE_KEYWORDS_FILE = r"C:\Data\Crawler\labeled\software_keywords_ACTIVE.txt"
+_CAMOFOX_API = "http://localhost:8000"  # Local camofox server (default port)
+_HAS_CAMOFOX = False
+_KEYWORDS_ACTIVE = set()
+
+
+def _load_keywords() -> set:
+    """Load hardware + software keywords from files."""
+    keywords = set()
+    for fpath in [_HARDWARE_KEYWORDS_FILE, _SOFTWARE_KEYWORDS_FILE]:
+        if os.path.exists(fpath):
+            try:
+                with open(fpath, encoding="utf-8") as f:
+                    for line in f:
+                        kw = line.strip()
+                        if kw and not kw.startswith("#"):
+                            keywords.add(kw.lower())
+            except Exception as exc:
+                logger.warning("Could not load keywords from %s: %s", fpath, exc)
+    logger.info("Loaded %d keywords for supplier filtering", len(keywords))
+    return keywords
+
+
+def _check_page_keywords(url: str, keywords: set, timeout: int = 15) -> bool:
+    """
+    Use camofox to load the page and check if it contains any keywords.
+    Returns True if ≥1 keyword found, False otherwise.
+    """
+    if not keywords:
+        return True  # No filter = allow all
+    try:
+        resp = requests.post(
+            f"{_CAMOFOX_API}/api/browse",
+            json={"url": url},
+            timeout=timeout,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            snapshot = data.get("snapshot", "").lower()
+            found = [kw for kw in keywords if kw in snapshot]
+            if found:
+                logger.info("[%s] Found keywords: %s", urlparse(url).netloc, ", ".join(found[:3]))
+                return True
+            else:
+                logger.info("[%s] No relevant keywords on page", urlparse(url).netloc)
+                return False
+        else:
+            logger.warning("Camofox returned %d for %s", resp.status_code, url)
+            return True  # Fallback: allow if camofox fails
+    except requests.exceptions.ConnectionError:
+        logger.warning("Camofox not running at %s — skipping keyword filter", _CAMOFOX_API)
+        return True  # Fallback: allow if camofox unavailable
+    except Exception as exc:
+        logger.warning("Camofox error for %s: %s", url, exc)
+        return True  # Fallback: allow on error
+
+# ---------------------------------------------------------------------------
 # PDF relevance filtering
 # ---------------------------------------------------------------------------
 
@@ -365,6 +425,7 @@ class ScraperEngine:
         use_relevance_filter: bool = True,
         allowlist_only: bool = False,
         site_config_path: str | None = None,
+        use_keyword_filter: bool = True,
     ):
         self.page_timeout = page_timeout
         self.max_pdf_size_mb = max_pdf_size_mb
@@ -375,7 +436,9 @@ class ScraperEngine:
         self.days_before_rescrape = days_before_rescrape
         self.use_relevance_filter = use_relevance_filter
         self.allowlist_only = allowlist_only
+        self.use_keyword_filter = use_keyword_filter
         self._site_overrides = _load_site_configs(site_config_path)
+        self.keywords = _load_keywords() if use_keyword_filter else set()
 
         self._stop_event = threading.Event()
         self._rate_limiter = _DomainRateLimiter()
@@ -607,6 +670,13 @@ class ScraperEngine:
         4. Recursive link-walk (last resort)
         """
         logger.info("[%s] Starting — %s", supplier, url)
+
+        # Keyword filter: check if page contains relevant keywords before crawling
+        if self.use_keyword_filter and self.keywords:
+            if not _check_page_keywords(url, self.keywords, self.page_timeout):
+                logger.info("[%s] Skipping — no relevant keywords found", supplier)
+                return
+
         found_any = False
 
         # 1 + 2 — sitemap
