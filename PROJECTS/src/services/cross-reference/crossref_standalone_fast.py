@@ -1022,7 +1022,7 @@ class CrossReferenceEngine:
                     eta_display = ""
                 
                 print(f"\n{'='*80}")
-                print(f"🏢 PROCESSING SUPPLIER {supplier_idx}/{len(supplier_directories)} ({progress_percentage:.1f}%)")
+                print(f"[BUILDING] PROCESSING SUPPLIER {supplier_idx}/{len(supplier_directories)} ({progress_percentage:.1f}%)")
                 print(f"[DIR] Supplier: {supplier_dir}")
                 print(f"⏱️  Elapsed: {elapsed_time/60:.1f}m{eta_display}")
                 print(f"{'='*80}")
@@ -2937,7 +2937,7 @@ def main():
                 # Check PDF directory contents
                 try:
                     pdf_contents = os.listdir(pdf_dir)
-                    gui_print(f"📁 PDF directory contains: {pdf_contents}")
+                    gui_print(f"[FILE] PDF directory contains: {pdf_contents}")
                     
                     # Count PDF files
                     pdf_files = [f for f in pdf_contents if f.lower().endswith('.pdf')]
