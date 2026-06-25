@@ -629,7 +629,7 @@ class CrossReferenceEngine:
         if not clean_output:
             print("=== STARTING CROSS-REFERENCE ANALYSIS ===")
             if test_mode:
-                print("🧪 TEST MODE ENABLED - Processing limited items")
+                print("[TEST] TEST MODE ENABLED - Processing limited items")
         
         try:
             # Validate inputs
@@ -683,11 +683,11 @@ class CrossReferenceEngine:
             # Load input file
             try:
                 if not clean_output:
-                    print(f"📂 Loading input file: {input_file}")
+                    print(f"[DIR] Loading input file: {input_file}")
                 input_df = pd.read_excel(input_file)
                 if not clean_output:
                     print(f"[OK] Input file loaded: {len(input_df)} rows")
-                    print(f"📋 Input file columns: {list(input_df.columns)}")
+                    print(f"[LIST] Input file columns: {list(input_df.columns)}")
                     
                     print("📄 First 3 rows of input file:")
                     for idx, row in input_df.head(3).iterrows():
@@ -703,11 +703,11 @@ class CrossReferenceEngine:
             # Load master file
             try:
                 if not clean_output:
-                    print(f"📂 Loading master file: {master_file}")
+                    print(f"[DIR] Loading master file: {master_file}")
                 master_df = pd.read_excel(master_file)
                 if not clean_output:
                     print(f"[OK] Master file loaded: {len(master_df)} rows")
-                    print(f"📋 Master file columns: {list(master_df.columns)}")
+                    print(f"[LIST] Master file columns: {list(master_df.columns)}")
                     
                     print("📄 First 3 rows of master file:")
                     for idx, row in master_df.head(3).iterrows():
@@ -740,14 +740,14 @@ class CrossReferenceEngine:
                 print(f"🛡️ SAFETY LIMIT: Processing first {total_items} items to prevent memory issues")
                 input_df = input_df.head(1000)  # Take first 1000 rows
             else:
-                print(f"📊 Processing all {total_items} items")
+                print(f"[CHART] Processing all {total_items} items")
             
             # Limit items in test mode
             if test_mode:
                 total_items = min(total_items, 20)  # Process first 20 items in test mode
                 input_df = input_df.head(20)  # Only take first 20 rows
                 if not clean_output:
-                    print(f"🧪 TEST MODE: Processing only first {total_items} items")
+                    print(f"[TEST] TEST MODE: Processing only first {total_items} items")
             
             print(f"Processing {total_items} items...")
             
@@ -899,10 +899,10 @@ class CrossReferenceEngine:
         if items_with_matches > 0:
             print(f"[OK] Found {total_matches} matches for {items_with_matches} items")
             avg_matches = total_matches / items_with_matches
-            print(f"📊 Average: {avg_matches:.1f} matches per item")
+            print(f"[CHART] Average: {avg_matches:.1f} matches per item")
             
             # Show all matches in clean format
-            print("\n📋 MATCH RESULTS:")
+            print("\n[LIST] MATCH RESULTS:")
             total_pdfs = len(self.results)
             for i, result in enumerate(self.results, 1):
                 # Extract filename from full path
@@ -975,13 +975,13 @@ class CrossReferenceEngine:
             supplier_directories = sorted([d for d in os.listdir(pdf_dir) 
                                          if os.path.isdir(os.path.join(pdf_dir, d))])
             
-            print(f"📂 Found {len(supplier_directories)} supplier directories to process")
-            print(f"📋 Suppliers: {supplier_directories[:10]}{'...' if len(supplier_directories) > 10 else ''}")
-            print(f"🔄 Each supplier will be processed individually with progress indicators")
+            print(f"[DIR] Found {len(supplier_directories)} supplier directories to process")
+            print(f"[LIST] Suppliers: {supplier_directories[:10]}{'...' if len(supplier_directories) > 10 else ''}")
+            print(f"[LOOP] Each supplier will be processed individually with progress indicators")
             
             if test_mode and len(supplier_directories) > 5:
                 supplier_directories = supplier_directories[:5]
-                print(f"🧪 TEST MODE: Limited to first {len(supplier_directories)} suppliers")
+                print(f"[TEST] TEST MODE: Limited to first {len(supplier_directories)} suppliers")
             
             # Initialize counters
             processed_suppliers = 0
@@ -1023,7 +1023,7 @@ class CrossReferenceEngine:
                 
                 print(f"\n{'='*80}")
                 print(f"🏢 PROCESSING SUPPLIER {supplier_idx}/{len(supplier_directories)} ({progress_percentage:.1f}%)")
-                print(f"📂 Supplier: {supplier_dir}")
+                print(f"[DIR] Supplier: {supplier_dir}")
                 print(f"⏱️  Elapsed: {elapsed_time/60:.1f}m{eta_display}")
                 print(f"{'='*80}")
                 processed_suppliers += 1
@@ -1072,7 +1072,7 @@ class CrossReferenceEngine:
                 for _, category, _ in filtered_pdfs:
                     category_counts[category] = category_counts.get(category, 0) + 1
                 
-                print(f"  📊 Smart filtering results:")
+                print(f"  [CHART] Smart filtering results:")
                 print(f"    Original PDFs: {len(pdf_files)}")
                 print(f"    After filtering: {len(filtered_pdfs)}")
                 print(f"    Filtered out: {len(pdf_files) - len(filtered_pdfs)} PDFs ({((len(pdf_files) - len(filtered_pdfs)) / len(pdf_files) * 100):.1f}%)")
@@ -1102,9 +1102,9 @@ class CrossReferenceEngine:
                 total_elapsed = current_time - start_time
                 if supplier_idx > 1:
                     supplier_time = total_elapsed / supplier_idx
-                    print(f"  📊 Supplier completed (avg {supplier_time:.1f}s per supplier)")
+                    print(f"  [CHART] Supplier completed (avg {supplier_time:.1f}s per supplier)")
                 else:
-                    print(f"  📊 Supplier completed")
+                    print(f"  [CHART] Supplier completed")
                 print(f"  📈 Overall progress: {processed_suppliers}/{len(supplier_directories)} suppliers, {total_matches} total matches")
                 
                 # Memory cleanup after each supplier
@@ -1117,18 +1117,18 @@ class CrossReferenceEngine:
             total_time = time.time() - start_time
             print(f"\n🏁 SUPPLIER-BY-SUPPLIER ANALYSIS COMPLETE")
             print(f"⏱️ Total time: {total_time:.1f} seconds ({total_time/60:.1f} minutes)")
-            print(f"📊 Processed {processed_suppliers} suppliers")
-            print(f"📊 Processed {processed_items} Instrument items")
-            print(f"📊 Skipped {total_skipped_items} Non-Instrument/Software items")
-            print(f"📊 Found {total_matches} total matches")
-            print(f"📊 {suppliers_with_matches}/{processed_suppliers} suppliers had matches")
+            print(f"[CHART] Processed {processed_suppliers} suppliers")
+            print(f"[CHART] Processed {processed_items} Instrument items")
+            print(f"[CHART] Skipped {total_skipped_items} Non-Instrument/Software items")
+            print(f"[CHART] Found {total_matches} total matches")
+            print(f"[CHART] {suppliers_with_matches}/{processed_suppliers} suppliers had matches")
             
             if total_matches > 0:
                 match_rate = (suppliers_with_matches / processed_suppliers) * 100 if processed_suppliers > 0 else 0
-                print(f"📊 Supplier match rate: {match_rate:.1f}%")
+                print(f"[CHART] Supplier match rate: {match_rate:.1f}%")
                 if processed_items > 0:
                     item_match_rate = (total_matches / processed_items) * 100
-                    print(f"📊 Item match rate: {item_match_rate:.1f}% ({total_matches}/{processed_items} items found matches)")
+                    print(f"[CHART] Item match rate: {item_match_rate:.1f}% ({total_matches}/{processed_items} items found matches)")
             
             return True
             
@@ -1149,7 +1149,7 @@ class CrossReferenceEngine:
                 
                 if len(potential_items) > 0:
                     supplier_items = potential_items
-                    print(f"    📋 Found {len(supplier_items)} total items in column '{col_name}'")
+                    print(f"    [LIST] Found {len(supplier_items)} total items in column '{col_name}'")
                     break
         
         # Filter out Non-Instrument and Software items
@@ -1336,7 +1336,7 @@ class CrossReferenceEngine:
             print("[ERROR] No PDF files to process")
             return []
         
-        print(f"🔄 Processing {len(pdf_file_paths)} PDFs in parallel...")
+        print(f"[LOOP] Processing {len(pdf_file_paths)} PDFs in parallel...")
         matches = []
         processed_count = 0
         
@@ -1369,7 +1369,7 @@ class CrossReferenceEngine:
                         
                         # Progress update and memory cleanup
                         if processed_count % 50 == 0:
-                            print(f"📊 Processed {processed_count}/{len(pdf_file_paths)} PDFs")
+                            print(f"[CHART] Processed {processed_count}/{len(pdf_file_paths)} PDFs")
                             import gc
                             gc.collect()
                         
@@ -1455,7 +1455,7 @@ class CrossReferenceEngine:
             
             # Get all available supplier directories
             available_suppliers = [d for d in os.listdir(pdf_dir) if os.path.isdir(os.path.join(pdf_dir, d))]
-            print(f"    📂 Available supplier directories ({len(available_suppliers)}): {available_suppliers}")
+            print(f"    [DIR] Available supplier directories ({len(available_suppliers)}): {available_suppliers}")
             
             # Try to find a matching supplier directory with multiple strategies
             matching_supplier_dir = None
@@ -1543,7 +1543,7 @@ class CrossReferenceEngine:
                     print(f"      ⚠️ Consider manually checking if this is the correct supplier directory")
                 
                 # FALLBACK: If no supplier directory found, search all directories
-                print(f"      🔄 FALLBACK: Searching all PDF directories since no supplier match found")
+                print(f"      [LOOP] FALLBACK: Searching all PDF directories since no supplier match found")
                 all_pdf_files = []
                 for supplier_dir in available_suppliers:
                     supplier_path = os.path.join(pdf_dir, supplier_dir)
@@ -1551,7 +1551,7 @@ class CrossReferenceEngine:
                     for pdf_file in pdf_files:
                         all_pdf_files.append((os.path.join(supplier_path, pdf_file), supplier_dir))
                 
-                print(f"      📂 FALLBACK: Will search {len(all_pdf_files)} PDF files across all directories")
+                print(f"      [DIR] FALLBACK: Will search {len(all_pdf_files)} PDF files across all directories")
                 
                 # Process all PDFs in fallback mode
                 total_pdfs = len(all_pdf_files)
@@ -1589,7 +1589,7 @@ class CrossReferenceEngine:
                             
                             # Calculate match score
                             score = self.calculate_match_score(search_keywords, pdf_text, description, threshold)
-                            print(f"            📊 Final Score: {score:.1f}% (threshold: {threshold}%)")
+                            print(f"            [CHART] Final Score: {score:.1f}% (threshold: {threshold}%)")
                             
                             if score >= threshold:
                                 print(f"            [OK] FALLBACK MATCH! Score {score:.1f}% >= {threshold}%")
@@ -1612,9 +1612,9 @@ class CrossReferenceEngine:
                     # Memory cleanup after each batch
                     import gc
                     gc.collect()
-                    print(f"        🧹 Fallback batch completed, memory cleaned up")
+                    print(f"        [CLEAN] Fallback batch completed, memory cleaned up")
                 
-                print(f"      📊 Fallback search completed: {fallback_matches} matches found")
+                print(f"      [CHART] Fallback search completed: {fallback_matches} matches found")
                 return matches
             
             print(f"      [OK] Found matching supplier directory: {matching_supplier_dir}")
@@ -1646,7 +1646,7 @@ class CrossReferenceEngine:
                 print(f"      [ERROR] Supplier path is not a directory: {supplier_path}")
                 return matches
             
-            print(f"      📂 Using supplier directory: {supplier_path}")
+            print(f"      [DIR] Using supplier directory: {supplier_path}")
             
             # Get PDF files from this specific supplier directory only
             pdf_files = [f for f in os.listdir(supplier_path) if f.lower().endswith('.pdf')]
@@ -1669,7 +1669,7 @@ class CrossReferenceEngine:
             for _, category, _ in filtered_pdfs:
                 category_counts[category] = category_counts.get(category, 0) + 1
             
-            print(f"      📊 Smart filtering results:")
+            print(f"      [CHART] Smart filtering results:")
             print(f"        Original PDFs: {len(pdf_files)}")
             print(f"        After filtering: {len(filtered_pdfs)}")
             print(f"        Filtered out: {len(pdf_files) - len(filtered_pdfs)} PDFs ({((len(pdf_files) - len(filtered_pdfs)) / len(pdf_files) * 100):.1f}%)")
@@ -1731,9 +1731,9 @@ class CrossReferenceEngine:
                         score = min(base_score + priority_boost, 100.0)
                         
                         if priority_boost > 0:
-                            print(f"            📊 Base Score: {base_score:.1f}% + Priority Boost: +{priority_boost} = Final Score: {score:.1f}% (threshold: {threshold}%)")
+                            print(f"            [CHART] Base Score: {base_score:.1f}% + Priority Boost: +{priority_boost} = Final Score: {score:.1f}% (threshold: {threshold}%)")
                         else:
-                            print(f"            📊 Final Score: {score:.1f}% (threshold: {threshold}%)")
+                            print(f"            [CHART] Final Score: {score:.1f}% (threshold: {threshold}%)")
                         
                         if score >= threshold:
                             print(f"            [OK] MATCH! Score {score:.1f}% >= {threshold}%")
@@ -1756,11 +1756,11 @@ class CrossReferenceEngine:
                 # Memory cleanup after each batch
                 import gc
                 gc.collect()
-                print(f"        🧹 Batch completed, memory cleaned up")
+                print(f"        [CLEAN] Batch completed, memory cleaned up")
             
             total_time = time.time() - start_time
             print(f"    ⏱️ Total processing time: {total_time:.1f}s")
-            print(f"    📊 Processed {total_pdfs} PDFs from supplier '{matching_supplier_dir}'")
+            print(f"    [CHART] Processed {total_pdfs} PDFs from supplier '{matching_supplier_dir}'")
             print(f"    Total matches found: {len(matches)}")
             
             # Deduplicate matches by normalized filename
@@ -1768,7 +1768,7 @@ class CrossReferenceEngine:
                 original_count = len(matches)
                 matches = deduplicate_matches(matches)
                 if len(matches) < original_count:
-                    print(f"    🔄 Deduplication: {original_count} -> {len(matches)} matches")
+                    print(f"    [LOOP] Deduplication: {original_count} -> {len(matches)} matches")
             
             return matches
             
@@ -1832,7 +1832,7 @@ class CrossReferenceEngine:
             
             # Get all available supplier directories
             available_suppliers = [d for d in os.listdir(pdf_dir) if os.path.isdir(os.path.join(pdf_dir, d))]
-            print(f"    📂 Available supplier directories ({len(available_suppliers)}): {available_suppliers}")
+            print(f"    [DIR] Available supplier directories ({len(available_suppliers)}): {available_suppliers}")
             
             # Try to find a matching supplier directory with multiple strategies
             matching_supplier_dir = None
@@ -1902,7 +1902,7 @@ class CrossReferenceEngine:
             
             if not matching_supplier_dir:
                 print(f"      [ERROR] No matching supplier directory found for '{current_supplier}'")
-                print(f"      🔄 FALLBACK: Searching all PDF directories since no supplier match found")
+                print(f"      [LOOP] FALLBACK: Searching all PDF directories since no supplier match found")
                 
                 # Collect all PDF files for fallback search
                 all_pdf_files = []
@@ -1912,11 +1912,11 @@ class CrossReferenceEngine:
                     for pdf_file in pdf_files:
                         all_pdf_files.append((os.path.join(supplier_path, pdf_file), supplier_dir))
                 
-                print(f"      📂 FALLBACK: Will search {len(all_pdf_files)} PDF files across all directories")
+                print(f"      [DIR] FALLBACK: Will search {len(all_pdf_files)} PDF files across all directories")
                 
                 # Use high-performance processing for fallback with recovery
                 matches = self.process_pdfs_with_recovery(all_pdf_files, search_keywords, description, threshold)
-                print(f"      📊 Fallback search completed: {len(matches)} matches found")
+                print(f"      [CHART] Fallback search completed: {len(matches)} matches found")
                 return matches
             
             print(f"      [OK] Found matching supplier directory: {matching_supplier_dir}")
@@ -1927,7 +1927,7 @@ class CrossReferenceEngine:
                 print(f"      [ERROR] Supplier directory not found or not a directory: {supplier_path}")
                 return matches
             
-            print(f"      📂 Using supplier directory: {supplier_path}")
+            print(f"      [DIR] Using supplier directory: {supplier_path}")
             
             # Get PDF files from this specific supplier directory only
             pdf_files = [f for f in os.listdir(supplier_path) if f.lower().endswith('.pdf')]
@@ -1950,7 +1950,7 @@ class CrossReferenceEngine:
             for _, category, _ in filtered_pdfs:
                 category_counts[category] = category_counts.get(category, 0) + 1
             
-            print(f"      📊 Smart filtering results:")
+            print(f"      [CHART] Smart filtering results:")
             print(f"        Original PDFs: {len(pdf_files)}")
             print(f"        After filtering: {len(filtered_pdfs)}")
             print(f"        Filtered out: {len(pdf_files) - len(filtered_pdfs)} PDFs ({((len(pdf_files) - len(filtered_pdfs)) / len(pdf_files) * 100):.1f}%)")
@@ -1968,7 +1968,7 @@ class CrossReferenceEngine:
             
             total_time = time.time() - start_time
             print(f"    ⏱️ Total processing time: {total_time:.1f}s")
-            print(f"    📊 Processed {len(filtered_pdf_files)} PDFs from supplier '{matching_supplier_dir}' (filtered from {len(pdf_files)} total)")
+            print(f"    [CHART] Processed {len(filtered_pdf_files)} PDFs from supplier '{matching_supplier_dir}' (filtered from {len(pdf_files)} total)")
             print(f"    Total matches found: {len(matches)}")
             
             # Deduplicate matches by normalized filename
@@ -1976,7 +1976,7 @@ class CrossReferenceEngine:
                 original_count = len(matches)
                 matches = deduplicate_matches(matches)
                 if len(matches) < original_count:
-                    print(f"    🔄 Deduplication: {original_count} -> {len(matches)} matches")
+                    print(f"    [LOOP] Deduplication: {original_count} -> {len(matches)} matches")
             
             return matches
             
@@ -1994,7 +1994,7 @@ class CrossReferenceEngine:
         processed_count = 0
         total_pdfs = len(pdf_file_paths)
         
-        print(f"        📊 Processing {total_pdfs} PDFs for supplier")
+        print(f"        [CHART] Processing {total_pdfs} PDFs for supplier")
         
         # Use a single worker for stability
         max_workers = 1
@@ -2030,7 +2030,7 @@ class CrossReferenceEngine:
                         else:
                             # Show progress every 10 PDFs or when complete
                             if processed_count % 10 == 0 or processed_count == total_pdfs:
-                                print(f"        📊 Progress: {processed_count}/{total_pdfs} PDFs processed")
+                                print(f"        [CHART] Progress: {processed_count}/{total_pdfs} PDFs processed")
                                 
                     except TimeoutError:
                         pdf_path, supplier_dir = future_to_args[future]
@@ -2047,14 +2047,14 @@ class CrossReferenceEngine:
         except Exception as e:
             print(f"        [ERROR] Parallel processing error: {e}")
             # Fallback to sequential processing
-            print("        🔄 Falling back to sequential processing...")
+            print("        [LOOP] Falling back to sequential processing...")
             return self.process_pdfs_sequential(pdf_file_paths, search_keywords, description, threshold)
         finally:
             # Force cleanup of any remaining processes
             try:
                 import gc
                 gc.collect()
-                print("        🧹 Force cleanup completed")
+                print("        [CLEAN] Force cleanup completed")
             except:
                 pass
         
@@ -2102,9 +2102,9 @@ class CrossReferenceEngine:
         if hasattr(self, 'test_mode') and self.test_mode:
             pdf_file_paths = pdf_file_paths[:100]
             total_pdfs = len(pdf_file_paths)
-            print(f"        🧪 TEST MODE: Processing only first {total_pdfs} PDFs")
+            print(f"        [TEST] TEST MODE: Processing only first {total_pdfs} PDFs")
         else:
-            print(f"        📊 Processing all {total_pdfs} PDFs")
+            print(f"        [CHART] Processing all {total_pdfs} PDFs")
         
         import time
         overall_start_time = time.time()
@@ -2143,7 +2143,7 @@ class CrossReferenceEngine:
             # Force cleanup after each batch
             import gc
             gc.collect()
-            print(f"        🧹 Batch completed, memory cleaned")
+            print(f"        [CLEAN] Batch completed, memory cleaned")
         
         return matches
 
@@ -2493,7 +2493,7 @@ class CrossReferenceEngine:
 
     def cleanup_processes(self):
         """Enhanced process cleanup to prevent hanging."""
-        print("🧹 Cleaning up processes...")
+        print("[CLEAN] Cleaning up processes...")
         
         if hasattr(self, 'parent_gui_processes'):
             for process in self.parent_gui_processes[:]:  # Iterate over copy
@@ -2945,7 +2945,7 @@ def main():
                     
                     # Check for supplier folders
                     supplier_folders = [d for d in pdf_contents if os.path.isdir(os.path.join(pdf_dir, d))]
-                    gui_print(f"📂 Found {len(supplier_folders)} supplier folders: {supplier_folders}")
+                    gui_print(f"[DIR] Found {len(supplier_folders)} supplier folders: {supplier_folders}")
                     
                     if not supplier_folders:
                         gui_print("⚠️ No supplier folders found! Expected structure:")
@@ -2970,10 +2970,10 @@ def main():
                     for folder in supplier_folders:
                         folder_path = os.path.join(pdf_dir, folder)
                         folder_pdfs = [f for f in os.listdir(folder_path) if f.lower().endswith('.pdf')]
-                        gui_print(f"  📂 {folder}: {len(folder_pdfs)} PDF files")
+                        gui_print(f"  [DIR] {folder}: {len(folder_pdfs)} PDF files")
                         total_pdfs += len(folder_pdfs)
                     
-                    gui_print(f"📊 Total PDFs found: {total_pdfs}")
+                    gui_print(f"[CHART] Total PDFs found: {total_pdfs}")
                     
                     if total_pdfs == 0:
                         gui_print("[ERROR] No PDF files found in supplier folders!")
@@ -3047,7 +3047,7 @@ def main():
             try:
                 # Clear output area
                 output_text.delete(1.0, tk.END)
-                gui_print("🧪 Creating test data...")
+                gui_print("[TEST] Creating test data...")
                 
                 # Create test input file
                 test_input_data = {
