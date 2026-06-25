@@ -54,7 +54,7 @@
   },
 
   "crossref": {
-    "threshold":      30,
+    "threshold":      60,
     "test_mode":      false,
     "low_cpu_mode":   true,
     "clean_output":   true

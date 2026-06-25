@@ -134,7 +134,7 @@ def clean_excel_file(excel_path: str, output_path: str = None,
     file_ext = Path(excel_path).suffix.lower()
     if file_ext == ".csv":
         encoding = detect_file_encoding(excel_path)
-        df = pd.read_csv(excel_path, skiprows=1, encoding=encoding)
+        df = pd.read_csv(excel_path, encoding=encoding)
     else:
         df = pd.read_excel(excel_path)
     print(f"[data_cleaner] Loaded: {excel_path} ({len(df)} rows)")

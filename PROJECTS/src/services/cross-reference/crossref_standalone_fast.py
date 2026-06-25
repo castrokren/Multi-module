@@ -467,7 +467,7 @@ class PDFSmartFilter:
 
         # Medium priority patterns — return neutral score (allow text matching)
         medium_priority_keywords = [
-            'brochure', 'product brief', 'overview'
+            'product brief', 'overview'
         ]
 
         for keyword in medium_priority_keywords:
@@ -479,7 +479,7 @@ class PDFSmartFilter:
             'invoice', 'receipt', 'order', 'price list', 'catalog',
             'drawing', 'dwg', 'cad', 'schematic', 'reprint',
             'flyer', 'poster', 'advertisement', 'marketing', 'sales',
-            'part list', 'color code'
+            'part list', 'color code', 'brochure'
         ]
 
         for keyword in low_priority_keywords:
@@ -930,11 +930,11 @@ class CrossReferenceEngine:
         self.test_mode = test_mode
 
         print("=== STARTING SUPPLIER-BY-SUPPLIER CROSS-REFERENCE ANALYSIS ===")
-        print("🎯 Processing each supplier directory in alphabetical order")
-        print("🏁 Will naturally complete when all supplier directories are processed")
+        print("[*] Processing each supplier directory in alphabetical order")
+        print("[*] Will naturally complete when all supplier directories are processed")
 
         if test_mode:
-            print("🧪 TEST MODE ENABLED - Processing limited suppliers")
+            print("[TEST] TEST MODE ENABLED - Processing limited suppliers")
         
         try:
             # Validate inputs
