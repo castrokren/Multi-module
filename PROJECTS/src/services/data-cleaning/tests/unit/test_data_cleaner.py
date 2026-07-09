@@ -18,6 +18,7 @@ from data_cleaner import (
     clean_supplier_name,
     detect_corrupted_names,
     clean_excel_file,
+    clean_all_input_excels,
     CLEANUP_PATTERNS,
 )
 
@@ -305,6 +306,100 @@ class TestEdgeCases:
         """Pattern detection should be case-insensitive"""
         assert clean_supplier_name("company***use v#1***") == "company"
         assert clean_supplier_name("COMPANY***USE V#1***") == "COMPANY"
+
+
+class TestCleanAllInputExcels:
+    """Test bulk cleaning of all files in a directory"""
+
+    @pytest.mark.unit
+    def test_cleans_all_excel_files(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            f1 = os.path.join(tmpdir, "a.xlsx")
+            f2 = os.path.join(tmpdir, "b.xlsx")
+            pd.DataFrame({"Supplier Name": ["COMPANY***USE V#1***", "OK"]}).to_excel(f1, index=False)
+            pd.DataFrame({"Supplier Name": ["ORG***USE V#2***"]}).to_excel(f2, index=False)
+
+            result = clean_all_input_excels(tmpdir, dry_run=False)
+
+            assert result["files_processed"] == 2
+            assert result["total_rows_cleaned"] == 2
+            assert result["total_rows"] == 3
+
+    @pytest.mark.unit
+    def test_includes_csv_files(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            csv_file = os.path.join(tmpdir, "data.csv")
+            pd.DataFrame({"Supplier Name": ["NAME***"]}).to_csv(csv_file, index=False)
+
+            result = clean_all_input_excels(tmpdir, dry_run=False)
+
+            assert result["files_processed"] >= 1
+
+    @pytest.mark.unit
+    def test_dry_run_does_not_modify_files(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            f1 = os.path.join(tmpdir, "test.xlsx")
+            original_df = pd.DataFrame({"Supplier Name": ["DIRTY***NAME***"]})
+            original_df.to_excel(f1, index=False)
+
+            result = clean_all_input_excels(tmpdir, dry_run=True)
+
+            assert result["dry_run"] is True
+            assert result["total_rows_cleaned"] == 1
+
+            df_after = pd.read_excel(f1)
+            assert df_after.iloc[0]["Supplier Name"] == "DIRTY***NAME***"
+
+    @pytest.mark.unit
+    def test_raises_on_missing_directory(self):
+        with pytest.raises(FileNotFoundError):
+            clean_all_input_excels("C:/nonexistent_dir_xyz")
+
+    @pytest.mark.unit
+    def test_returns_zero_for_empty_directory(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = clean_all_input_excels(tmpdir, dry_run=False)
+            assert result["files_processed"] == 0
+            assert result["total_rows_cleaned"] == 0
+
+    @pytest.mark.unit
+    def test_results_include_per_file_details(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            f1 = os.path.join(tmpdir, "a.xlsx")
+            pd.DataFrame({"Supplier Name": ["DIRTY***"]}).to_excel(f1, index=False)
+
+            result = clean_all_input_excels(tmpdir, dry_run=False)
+
+            assert len(result["results"]) == 1
+            for r in result["results"]:
+                assert "input_file" in r
+                assert "status" in r
+
+    @pytest.mark.unit
+    def test_skips_nonexcel_files(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            f1 = os.path.join(tmpdir, "data.xlsx")
+            pd.DataFrame({"Supplier Name": ["A***"]}).to_excel(f1, index=False)
+            txt = os.path.join(tmpdir, "readme.txt")
+            with open(txt, "w") as f:
+                f.write("not an excel")
+
+            result = clean_all_input_excels(tmpdir, dry_run=False)
+
+            assert result["files_processed"] == 1
+
+    @pytest.mark.unit
+    def test_handles_mixed_columns_gracefully(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            f1 = os.path.join(tmpdir, "no_supplier.xlsx")
+            pd.DataFrame({"Item": ["A", "B"]}).to_excel(f1, index=False)
+
+            result = clean_all_input_excels(tmpdir, dry_run=False)
+
+            for r in result["results"]:
+                if "error" in r.get("status", ""):
+                    continue
+            assert result["files_processed"] >= 1
 
 
 if __name__ == "__main__":
