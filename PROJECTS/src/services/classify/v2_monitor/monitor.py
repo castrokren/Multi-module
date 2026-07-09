@@ -106,7 +106,7 @@ class FileMonitor:
                 raise ImportError("AdaptiveExcelProcessor not available")
             try:
                 self.processor = AdaptiveExcelProcessor(**self.processor_config)
-                self.logger.info("✓ Processor initialized")
+                self.logger.info("[OK] Processor initialized")
             except Exception as e:
                 self.logger.error(f"Failed to initialize processor: {e}", exc_info=True)
                 raise
@@ -169,7 +169,7 @@ class FileMonitor:
             success = self.processor.process_file(file_path)
 
             if success:
-                self.logger.info(f"✓ Success: {path.name}")
+                self.logger.info(f"[OK] Success: {path.name}")
                 return True
             else:
                 self.logger.warning(f"✗ Failed: {path.name}")

@@ -3,8 +3,8 @@
 Production-ready monitor service launcher.
 
 Works in two modes:
-1. Direct execution (python run_monitor_service.py) — for testing/Docker
-2. Windows Service (python run_monitor_service.py install/start/stop) — for production
+1. Direct execution (python run_monitor_service.py) - for testing/Docker
+2. Windows Service (python run_monitor_service.py install/start/stop) - for production
 
 Configuration is loaded from config.py with environment variable overrides.
 """
@@ -331,5 +331,5 @@ Examples:
             sys.exit(1)
 
     else:
-        # No arguments — run directly
+        # No arguments - run directly
         main()

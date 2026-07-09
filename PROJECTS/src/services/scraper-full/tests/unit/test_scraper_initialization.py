@@ -69,7 +69,7 @@ class TestDomainRateLimiter:
         rl = _DomainRateLimiter()
         rl.wait("a.com", 0.2)
         t0 = time.monotonic()
-        rl.wait("b.com", 0.2)   # b.com never seen — no wait
+        rl.wait("b.com", 0.2)   # b.com never seen - no wait
         assert time.monotonic() - t0 < 0.15
 
 
