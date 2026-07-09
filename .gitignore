@@ -42,6 +42,11 @@ wheels/
 logs/
 pdf_crawler.log
 
+# Agent/tool scratch
+.understand-anything/
+.workflow/
+quality-report.md
+
 # Large Data Files
 *.xlsx
 *.xls
