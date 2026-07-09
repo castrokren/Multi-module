@@ -425,7 +425,7 @@ class ServiceGUI(tk.Tk):
             success = monitor._process_file(str(test_file))
 
             if success:
-                self._log_message("✓ Test PASSED")
+                self._log_message("[OK] Test PASSED")
                 messagebox.showinfo("Test Success",
                     f"Successfully processed: {test_file.name}\n\n"
                     f"Output file created in: {self.output_dir_var.get()}")
@@ -543,15 +543,15 @@ class ServiceGUI(tk.Tk):
             "Enhanced with Adaptive Learning Processor\n"
             "Automatically improves classification accuracy over time\n\n"
             "Features:\n"
-            "• Three-category classification (Research Instruments, Software, Non-Instruments)\n"
-            "• Vendor-based classification (uses supplier column)\n"
-            "• Adaptive learning processor\n"
-            "• Automatic keyword discovery\n"
-            "• Learning analytics and reports\n\n"
+            "- Three-category classification (Research Instruments, Software, Non-Instruments)\n"
+            "- Vendor-based classification (uses supplier column)\n"
+            "- Adaptive learning processor\n"
+            "- Automatic keyword discovery\n"
+            "- Learning analytics and reports\n\n"
             "Classification Logic:\n"
-            "• Vendor names (e.g., 'EMPIRE OFFICE INC' → Non-Instrument)\n"
-            "• Description keywords (fallback)\n"
-            "• Intelligent overlap handling\n\n"
+            "- Vendor names (e.g., 'EMPIRE OFFICE INC' -> Non-Instrument)\n"
+            "- Description keywords (fallback)\n"
+            "- Intelligent overlap handling\n\n"
             "Keyboard Shortcuts:\n"
             "Ctrl+S: Save Config\n"
             "Ctrl+O: Load Config\n"
