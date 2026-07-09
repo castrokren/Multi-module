@@ -4,13 +4,11 @@ block_cipher = None
 
 a = Analysis(
     ['pdf_crawler_gui_2.py'],
-    pathex=[],
+    # Parent dir so the shared pipeline module (keyword tokenizer) is bundled
+    pathex=['..'],
     binaries=[],
     datas=[
-        ('requirements.txt', '.'),
         ('READ me.txt', '.'),
-        ('NQ_DG_RESEARCH_CAPITAL_V2-39579943_labeled.xlsx', '.'),
-        ('updated_master_list.xlsx', '.'),
     ],
     hiddenimports=[
         'tkinter',
@@ -19,25 +17,14 @@ a = Analysis(
         'pandas',
         'PyPDF2',
         'pdfplumber',
-        'beautifulsoup4',
-        'playwright',
         'requests',
         'urllib3',
-        'asyncio',
-        'threading',
-        'difflib',
-        'unicodedata',
-        're',
-        'os',
-        'time',
-        'shutil',
-        'typing',
         'bs4',
         'bs4.element',
-        'urllib.parse',
-        'urllib.parse.urlparse',
-        'urllib.parse.urljoin',
-        'urllib.parse.urldefrag',
+        'openpyxl',
+        # shared crawl engine + pipeline tokenizer (imported dynamically)
+        'scraper_engine',
+        'pipeline',
     ],
     hookspath=[],
     hooksconfig={},
@@ -65,11 +52,11 @@ exe = EXE(
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=False,  # Set to True if you want console window
+    console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=None,  # Add path to your icon file if you have one
-) 
+    icon=None,
+)
