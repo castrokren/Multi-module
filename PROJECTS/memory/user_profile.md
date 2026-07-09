@@ -26,6 +26,7 @@ type: user
 - Direct and concise in messages
 - Asks clarifying questions ("do this locally or on remote PC?") rather than making assumptions
 - Provides context about constraints upfront (network restrictions, ports, no email)
+- **Language:** English only — never write or speak in any other language. This is a permanent preference.
 
 ## Technical Environment
 
