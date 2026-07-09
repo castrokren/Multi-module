@@ -21,24 +21,24 @@ service_dir = Path(__file__).parent.parent.parent
 if str(service_dir) not in sys.path:
     sys.path.insert(0, str(service_dir))
 
+import crossref_standalone_fast
 from crossref_standalone_fast import (
     timeout_handler as module_timeout_handler,
     TimeoutException,
-    TimeoutError,
     GlobalStopManager,
     emergency_stop,
 )
 
 
 # ============================================================================
-# Duplicate timeout_handler
+# timeout_handler
 # ============================================================================
 
 
-class TestDuplicateTimeoutHandler:
+class TestTimeoutHandler:
     @pytest.mark.unit
-    def test_module_level_handler_raises_timeouterror(self):
-        with pytest.raises(TimeoutError, match="PDF processing timed out"):
+    def test_module_level_handler_raises_timeoutexception(self):
+        with pytest.raises(TimeoutException):
             module_timeout_handler(None, None)
 
     @pytest.mark.unit
@@ -46,21 +46,22 @@ class TestDuplicateTimeoutHandler:
         assert issubclass(TimeoutException, Exception)
 
     @pytest.mark.unit
-    def test_timeouterror_still_importable(self):
-        assert issubclass(TimeoutError, Exception)
+    def test_module_does_not_shadow_builtin_timeouterror(self):
+        # A custom TimeoutError here would swallow the builtin raised by
+        # future.result(timeout=...), so the module must not define one.
+        assert not hasattr(crossref_standalone_fast, "TimeoutError")
 
     @pytest.mark.unit
-    def test_two_exception_types_are_distinct(self):
+    def test_timeoutexception_is_not_builtin_timeouterror(self):
         assert TimeoutException is not TimeoutError
-        assert not issubclass(TimeoutError, TimeoutException)
         assert not issubclass(TimeoutException, TimeoutError)
 
     @pytest.mark.unit
-    def test_source_has_duplicate_timeout_handler_definitions(self):
+    def test_source_has_exactly_one_timeout_handler_definition(self):
         source = Path(__file__).parent.parent.parent / "crossref_standalone_fast.py"
         text = source.read_text(encoding="utf-8")
         count = text.count("def timeout_handler")
-        assert count == 2, f"Expected 2 timeout_handler defs, found {count}"
+        assert count == 1, f"Expected 1 timeout_handler def, found {count}"
 
 
 # ============================================================================
