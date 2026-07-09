@@ -121,13 +121,9 @@ def vv_log(message):
     if "[ERROR]" in message or "ERROR" in message:
         print(f"[{time.strftime('%H:%M:%S')}] {message}")
 
-class TimeoutError(Exception):
-    """Custom timeout exception."""
-    pass
-
-def timeout_handler(signum, frame):
-    """Signal handler for timeout."""
-    raise TimeoutError("PDF processing timed out")
+# ponytail: removed duplicate timeout_handler + custom TimeoutError class that
+# shadowed the builtin. Signal alarms raise TimeoutException (handler above);
+# future.result(timeout=) raises the builtin TimeoutError, now unshadowed.
 
 # Check if we're on Windows (where SIGALRM is not available)
 IS_WINDOWS = platform.system() == "Windows"
@@ -2437,8 +2433,8 @@ class CrossReferenceEngine:
                         # Restore original signal handler and cancel alarm
                         signal.alarm(0)
                         signal.signal(signal.SIGALRM, original_handler)
-                
-                except TimeoutError:
+
+                except TimeoutException:
                     print(f"    [TIMEOUT] Timeout processing PDF: {os.path.basename(pdf_path)}")
                     return ""
                 except Exception as e:
