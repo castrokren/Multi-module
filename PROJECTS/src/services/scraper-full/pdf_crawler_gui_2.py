@@ -31,9 +31,10 @@ from scraper_engine import ScraperEngine
 # Keyword tokenizer shared with the pipeline orchestrator
 try:
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-    from pipeline import _extract_keyword_tokens
+    from pipeline import _extract_keyword_tokens, prune_generic_keywords
 except ImportError:
     _extract_keyword_tokens = None
+    prune_generic_keywords = None
 
 # Enhanced logging system
 import logging
@@ -2190,6 +2191,7 @@ class PDFCrawlerEnhancedApp:
                     desc = str(row.get(desc_col, '')).strip()
                     if name and desc and desc.lower() != 'nan':
                         kw_sets.setdefault(name, set()).update(_extract_keyword_tokens(desc))
+                kw_sets = prune_generic_keywords(kw_sets)
                 supplier_keywords = {k: list(v) for k, v in kw_sets.items()}
                 self.log(f"Loaded keyword sets for {len(supplier_keywords)} suppliers", "info")
             else:
