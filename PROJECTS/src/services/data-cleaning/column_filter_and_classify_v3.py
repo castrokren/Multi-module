@@ -8,6 +8,7 @@ Hybrid Column Filtering + Classification (v3)
 
 import pandas as pd
 from pathlib import Path
+import re
 import sys
 import json
 
@@ -42,6 +43,102 @@ def load_supplier_classification():
     return {}
 
 
+# Junk that learning_mode auto-promoted into the keyword files: word
+# fragments ("multi" from MULTICLAMP, "contro" from "controlled", "ella" from
+# "cancellation", "lysis" from "analysis") and generic English that names no
+# product. Word-boundary matching kills the fragments; these are the ones that
+# survive as whole words and still mean nothing.
+# ponytail: blacklist here rather than editing the .txt files, so a future
+# learning run cannot silently reintroduce them.
+_JUNK_KEYWORDS = frozenset({
+    # word fragments
+    'multi', 'contro', 'ella', 'lysis', 'diss', 'moto', 'tera', 'diret',
+    'kinas', 'aeulos', 'semg', 'nomoto',
+    # generic English that names no product
+    'bill', 'sale', 'other', 'real', 'load', 'port', 'cold', 'heat',
+    'gene', 'pure', 'disk', 'quad', 'pico', 'trio', 'bath', 'shear',
+    'buyout', 'payoff', 'total', 'known', 'whole', 'expert', 'alias',
+    'legend', 'studio', 'trace', 'stress', 'pulse', 'ignite', 'encore',
+    'fluent', 'atlas', 'orbit', 'nexus', 'prior', 'rebel', 'quant',
+    'sonic', 'mantis', 'visor', 'flint', 'mateo', 'novac', 'miao',
+    # materials and packaging, not instruments
+    'glass', 'copper', 'vinyl', 'hinged', 'carboy', 'packs', 'cells',
+    'scales', 'micron', 'imaging', 'optics', 'lasers', 'biosafety',
+    # vendor / brand names, not products
+    'fisher', 'cytiva', 'valco', 'jena', 'acuson', 'advia', 'aeolus',
+    "labrepco's",
+})
+
+# Rig components and modules: parts OF an instrument, not an instrument.
+# A MultiClamp amplifier or an RHD recording controller is a component of an
+# electrophysiology rig - the rig is the instrument, these are not. Moved from
+# the Instrument list to Non-Instrument so they classify as what they are.
+_COMPONENT_KEYWORDS = frozenset({
+    'controller', 'amplifier', 'microelectrode', 'headstage', 'motor',
+    'pulser', 'slider', 'knobs', 'load cell', 'thermistor', 'thermocouple',
+    'rotor', 'centrifuge rotor', 'w/rotor', 'strain gauge', 'accelerometer',
+    'transilluminator', 'galvanometer',
+})
+
+
+# Part numbers and quote fragments that learning_mode harvested from past
+# requisitions ("a28568", "quote#", "2x/4x/10x", "sz51;microscope"). They name
+# one purchase, not a product category, and they make classification
+# self-fulfilling: the item that created the keyword is the item it matches.
+# Real terms with punctuation (gc-ms, icp-ms, -80, co2) are kept.
+_PART_NUMBER_RE = re.compile(r"[#@;/'\"()À-￿]|^\d+\.\d+$")
+
+
+# Software junk: IT/DevOps vocabulary, stopwords, fragments, and non-scientific brands.
+# Phase 2 cleanup per plan + Kren's domain judgment from REVIEW-keywords.md.
+_JUNK_SW = frozenset({
+    # IT_JARGON (plan S1) - enterprise/devops, explicit plan list
+    "docker", "kubernetes", "saas", "paas", "iaas", "gdpr", "hipaa", "itil",
+    "cobit", "mtbf", "mttr", "azure", "slack", "teams", "webex", "skype",
+    "redis", "mysql", "json", "yaml", "toml", "soap", "unix", "linux", "macos",
+    "agile", "scrum", "jira", "jenkins", "github", "devops", "ci/cd",
+    "bitbucket", "monitoring", "logging", "prometheus", "grafana", "elasticsearch",
+    "splunk", "vmware",
+    # STOPWORDS (plan S2) - generic English noise
+    "above", "below", "list", "price",
+    # FRAGMENTS (plan S2) - confirmed non-words
+    "coded", "cond", "agile", "scrum", "jira", "docker", "azure",
+    # Non-scientific brands / tools (Kren review S3)
+    "adobe", "autocad", "prism", "visio", "revit", "salesforce", "intel",
+    # Junk fragments from learning_mode
+    "gmpe", "pmml",
+})
+
+
+# Non-Instrument junk: stopwords, fragments, and vendor names that inflate ni_score.
+# Phase 3 cleanup per plan N1-N2 + Kren's domain judgment from REVIEW-keywords.md.
+_JUNK_NI = frozenset({
+    # STOPWORDS (plan N1) - generic English that matches half of all text
+    "been", "have", "only", "once", "your", "will", "need", "next", "over",
+    "four", "eight", "three", "kind", "great", "ideal", "comes", "away",
+    "less", "more", "down", "back", "left", "front", "side",
+    # FRAGMENTS (plan N2) - confirmed non-words
+    "assy", "secu", "repl", "obser", "insta", "prev", "clin", "univ", "vert",
+    "appl", "wqith",  # sic - typo in data
+    # Vendor names (Kren review N3)
+    "zebra", "nomad", "joel", "jess", "york", "rice",
+})
+
+
+def _is_scraped_part_number(kw: str) -> bool:
+    """True for one-off part numbers / quote fragments, not product terms."""
+    if _PART_NUMBER_RE.search(kw):
+        return True
+    # Alphanumeric soup like "bx43fw", "l23119", "x50i", "cm1950", "m3000":
+    # has digits, is not a known chemistry/temperature term, and is not a
+    # multi-word phrase.
+    if any(c.isdigit() for c in kw) and " " not in kw:
+        return kw not in {"co2", "pcr", "qpcr", "rtpcr", "gc-ms", "lc-ms",
+                          "icp-ms", "icp-aes", "-20", "-70", "-80",
+                          "real-time pcr", "spo2", "tcpco2", "pe-400"}
+    return False
+
+
 def load_and_clean_keywords():
     """
     Load keyword files, identify conflicts, remove them.
@@ -70,11 +167,23 @@ def load_and_clean_keywords():
 
     # Also remove overly-broad short keywords (< 4 chars, alphabetic only)
     def is_too_broad(kw):
-        return len(kw) < 4 and kw.isalpha() and kw not in {"pcr", "nmr", "gc", "lc", "rna", "dna"}
+        return (len(kw) < 4 and kw.isalpha() and kw not in {"pcr", "nmr", "gc", "lc", "rna", "dna"}) \
+            or kw in _JUNK_KEYWORDS \
+            or _is_scraped_part_number(kw)
+
+    def is_junk_sw(kw):
+        return kw in _JUNK_SW
+
+    def is_junk_ni(kw):
+        return kw in _JUNK_NI
 
     hw_kw_clean = {kw for kw in hw_kw_clean if not is_too_broad(kw)}
-    sw_kw_clean = {kw for kw in sw_kw_clean if not is_too_broad(kw)}
-    ni_kw_clean = {kw for kw in ni_kw_clean if not is_too_broad(kw)}
+    sw_kw_clean = {kw for kw in sw_kw_clean if not (is_too_broad(kw) or is_junk_sw(kw))}
+    ni_kw_clean = {kw for kw in ni_kw_clean if not (is_too_broad(kw) or is_junk_ni(kw))}
+
+    # Rig components are Non-Instrument, not Instrument.
+    hw_kw_clean -= _COMPONENT_KEYWORDS
+    ni_kw_clean |= _COMPONENT_KEYWORDS
 
     print(f"[v3] Keyword cleanup:")
     print(f"     Instrument: {len(hw_kw)} -> {len(hw_kw_clean)} (removed {len(hw_kw) - len(hw_kw_clean)})")
@@ -85,31 +194,83 @@ def load_and_clean_keywords():
     return hw_kw_clean, sw_kw_clean, ni_kw_clean
 
 
+# Instrument terms too vague to stand alone - they need a second hit to count.
+# "Analyzer slider" and "balance due" are not instruments; "TOC analyzer" and
+# "analytical balance" are, and those match as multi-word keywords anyway.
+_WEAK_HW = frozenset({
+    'meter', 'analyzer', 'balance', 'rotary', 'distillation', 'calorimetry',
+    'co2', 'gc', 'lc', 'electrophoresis', 'furnace', 'glove box',
+})
+
+
+def _count_hits(keywords: set, text: str, words: set) -> int:
+    """Count keyword hits, matching whole words - not substrings.
+
+    Bare `kw in text` scored "lysis" against "anaLYSIS", "ella" against
+    "cancELLAtion" and "contro" against "CONTROlled", which is what made the
+    same product classify differently on different rows. Multi-word keywords
+    ("plate reader") still need a substring test, but a single token must
+    match a whole word.
+    """
+    hits = 0
+    for kw in keywords:
+        if " " in kw:
+            if kw in text:
+                hits += 1
+        elif kw in words:
+            hits += 1
+    return hits
+
+
 def classify_item(req_line: str, item_desc: str, hw_kw: set, sw_kw: set, ni_kw: set) -> str:
     """
     Classify with priorities:
-    - Instrument: 2+ matches (high bar: it's the hardest to get right)
+    - Instrument: ONE unambiguous term ("centrifuge", "microscope") is enough;
+      ambiguous ones (_WEAK_HW: "meter", "analyzer") need a second hit, so
+      "Analyzer slider" stays out while "Eppendorf centrifuge 5810R" gets in
     - Software: 1+ matches (rarer, so lower bar)
     - Non-Instrument: 1+ matches (catch-all, lowest bar)
     - Instrument > Software > Non-Instrument (priority order for ties)
     """
     text = (str(req_line) + " " + str(item_desc)).lower()
+    words = set(re.findall(r"[a-z0-9][a-z0-9\-/.]*", text))
 
-    hw_score = sum(1 for kw in hw_kw if kw in text)
-    sw_score = sum(1 for kw in sw_kw if kw in text)
-    ni_score = sum(1 for kw in ni_kw if kw in text)
+    hw_score = _count_hits(hw_kw, text, words)
+    strong_hw = _count_hits(hw_kw - _WEAK_HW, text, words)
+    sw_score = _count_hits(sw_kw, text, words)
+    ni_score = _count_hits(ni_kw, text, words)
 
     # Priority order: Instrument > Software > Non-Instrument
-    if hw_score >= 2:
+    if strong_hw >= 1 or hw_score >= 2:
         return "Instrument"
     elif sw_score >= 1 and sw_score > ni_score:
         return "Software"
     elif ni_score >= 1 and ni_score > sw_score:
         return "Non-Instrument"
-    elif hw_score == 1:
-        return "Instrument"
     else:
         return "Unknown"
+
+
+# Rider lines that follow an instrument in the same quote: freight, cords,
+# warranties, services. Rules A and B must not promote these to Instrument.
+# Word-boundary match: bare "tax"/"fee" substrings would hit Pentax,
+# Stereotaxic, and feedback - all real instruments in this data.
+_RIDER_RE = re.compile(
+    r"\b(?:shipping|handling|freight|delivery|cords?|warr\w*|install\w*"
+    r"|training|trade[- ]in|svc|services?|support|fees?|tax|surcharge"
+    r"|discount|removal)\b",
+    re.IGNORECASE,
+)
+
+# Rule B promotes on supplier identity alone, so demand a second signal:
+# the line must cost like an instrument. Rows with no/zero price stay Unknown.
+# ponytail: single global threshold; per-category thresholds if ever needed.
+_RULE_B_MIN_PRICE = 1000
+
+
+def _is_rider(item_desc: str) -> bool:
+    """True if this line is a freight/service/accessory rider, not a product."""
+    return bool(_RIDER_RE.search(str(item_desc)))
 
 
 def filter_and_classify(input_file: str, output_dir: str = None, hw_kw: set = None,
@@ -142,8 +303,9 @@ def filter_and_classify(input_file: str, output_dir: str = None, hw_kw: set = No
     print(f"[v3] Loaded {len(df)} rows from {input_path.name}")
 
     # Map columns by position
-    col_indices = [1, 5, 6, 8, 14]  # B, F, G, I, O
-    col_names = ["Req ID", "Supplier ID", "Supplier Name", "Item Description", "Req Line Item"]
+    col_indices = [1, 5, 6, 8, 10, 14]  # B, F, G, I, K, O
+    col_names = ["Req ID", "Supplier ID", "Supplier Name", "Item Description",
+                 "Unit Price", "Req Line Item"]
 
     if len(df.columns) >= max(col_indices) + 1:
         df_filtered = df.iloc[:, col_indices].copy()
@@ -152,7 +314,7 @@ def filter_and_classify(input_file: str, output_dir: str = None, hw_kw: set = No
         available_cols = list(df.columns)
         print(f"[v3] Available columns: {available_cols}")
         col_mapping = {}
-        for target, col_pos in zip(col_names, [1, 5, 6, 8, 14]):
+        for target, col_pos in zip(col_names, col_indices):
             if target in df.columns:
                 col_mapping[target] = target
             elif col_pos < len(df.columns):
@@ -162,7 +324,7 @@ def filter_and_classify(input_file: str, output_dir: str = None, hw_kw: set = No
         df_filtered = df[[col_mapping[name] for name in col_names]]
         df_filtered.columns = col_names
 
-    print(f"[v3] Filtered to 5 columns: {', '.join(col_names)}")
+    print(f"[v3] Filtered to {len(col_names)} columns: {', '.join(col_names)}")
 
     # Classify each row
     classifications = []
@@ -183,7 +345,9 @@ def filter_and_classify(input_file: str, output_dir: str = None, hw_kw: set = No
         for i in range(1, len(group_indices)):
             curr_idx = group_indices[i]
             prev_idx = group_indices[i-1]
-            if df_filtered.at[curr_idx, "Type"] == "Unknown" and df_filtered.at[prev_idx, "Type"] == "Instrument":
+            if (df_filtered.at[curr_idx, "Type"] == "Unknown"
+                    and df_filtered.at[prev_idx, "Type"] == "Instrument"
+                    and not _is_rider(df_filtered.at[curr_idx, "Item Description"])):
                 df_filtered.at[curr_idx, "Type"] = "Instrument"
                 rule_a_count += 1
 
@@ -210,11 +374,15 @@ def filter_and_classify(input_file: str, output_dir: str = None, hw_kw: set = No
     # For Unknown items: if supplier is classified as equipment distributor -> reclassify as Instrument
     rule_b_count = 0
     if supplier_db:
+        prices = pd.to_numeric(df_filtered["Unit Price"], errors="coerce")
         for idx in df_filtered[df_filtered["Type"] == "Unknown"].index:
             supplier = df_filtered.at[idx, "Supplier Name"]
             supplier_type = supplier_db.get(supplier, "unknown")
-            # Reclassify Unknown from equipment suppliers to Instrument
-            if supplier_type in ["lab_equipment", "medical_equipment", "research_equipment"]:
+            # Reclassify Unknown from equipment suppliers to Instrument -
+            # but only if it also costs like an instrument (NaN/0 fails).
+            if (supplier_type in ["lab_equipment", "medical_equipment", "research_equipment"]
+                    and not _is_rider(df_filtered.at[idx, "Item Description"])
+                    and prices.at[idx] >= _RULE_B_MIN_PRICE):
                 df_filtered.at[idx, "Type"] = "Instrument"
                 rule_b_count += 1
 

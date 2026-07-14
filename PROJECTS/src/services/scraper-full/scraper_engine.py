@@ -39,6 +39,7 @@ import re
 import sqlite3
 import threading
 import time
+from collections import Counter
 from datetime import datetime, timedelta
 from pathlib import Path
 from queue import Queue, Empty
@@ -139,6 +140,12 @@ _PDF_BLOCKLIST = re.compile(
     r"|compliance|regulatory|iso[_\-\s]?cert|certificate[_\-\s]?of"
     r"|nda|agreement|contract|legal|disclaimer"
     r"|map|directions|parking|exhibit[_\-\s]?hall"
+    # HR / corporate: these carry the vendor's brand and words like "guide"
+    # or "brochure", so the allowlist waves them through otherwise.
+    r"|career|careers|candidate|recruit|job[_\-\s]?(description|posting)"
+    r"|working[_\-\s]?at|employee|benefits[_\-\s]?(guide|summary)"
+    r"|onboarding|code[_\-\s]?of[_\-\s]?conduct|esg|sustainability"
+    r"|investor|annual[_\-\s]?meeting|proxy"
     r"|irs|tax|form[_\-\s]?(w2|1040|1099|941|940|990|k1|ct[_\-]?1)"
     r"|w\-?2|1099|941|940|990|k\-?1|ct[_\-]?1"
     r"|earnings|payroll|deduction|withhold|federal|state[_\-\s]?tax)",
@@ -350,6 +357,9 @@ class _StateDB:
 DEFAULT_SITE_CONFIG = {
     "delay": 2.0,           # seconds between requests to this domain
     "max_pages": 50,        # hard cap on link-walk pages
+    "max_pdfs_per_supplier": 50,  # hard cap on downloads per supplier; a run
+                                  # past this means a generic keyword slipped
+                                  # through, not 50+ relevant docs
     "use_sitemap": True,    # attempt sitemap discovery
     "use_search": True,     # attempt filetype:pdf search discovery
     "use_recursive": True,  # fall back to recursive link-walking
@@ -475,7 +485,9 @@ class ScraperEngine:
         self.page_count = 0
         self.pdf_count = 0
         self._count_lock = threading.Lock()
+        self._supplier_pdf_counts: Counter = Counter()
         self._warned_no_kw: set[str] = set()
+        self._warned_pdf_cap: set[str] = set()
 
     # ------------------------------------------------------------------
     # Control
@@ -578,6 +590,8 @@ class ScraperEngine:
         self._stop_event.clear()
         self.page_count = 0
         self.pdf_count = 0
+        self._supplier_pdf_counts.clear()
+        self._warned_pdf_cap.clear()
 
         output_dir = str(output_dir)
         os.makedirs(output_dir, exist_ok=True)
@@ -1005,6 +1019,13 @@ class ScraperEngine:
     ):
         if not self.running:
             return
+        if self._supplier_pdf_counts[supplier] >= cfg["max_pdfs_per_supplier"]:
+            if supplier not in self._warned_pdf_cap:
+                self._warned_pdf_cap.add(supplier)
+                logger.warning("[%s] Per-supplier PDF cap (%d) reached - skipping "
+                               "further downloads (generic keyword slipping through?)",
+                               supplier, cfg["max_pdfs_per_supplier"])
+            return
         if not _validate_url(pdf_url):
             logger.warning("[%s] Blocked unsafe URL: %s", supplier, pdf_url)
             return
@@ -1135,6 +1156,7 @@ class ScraperEngine:
             state_db.update_status(pdf_url, "downloaded")
             with self._count_lock:
                 self.pdf_count += 1
+                self._supplier_pdf_counts[supplier] += 1
             logger.info("[%s] Downloaded: %s (%.1f MB) [%s]",
                         supplier, filename, actual / 1024 / 1024, reason)
 

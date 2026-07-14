@@ -5,10 +5,15 @@ Pipeline Orchestrator
 Runs the four modules in sequence:
 
     Stage 0 - Data Cleaning        : fix corrupted supplier names, normalize data
-    Stage 1 - Scraper              : crawl supplier websites, download PDFs
-    Stage 2 - Classify             : classify Excel items (Instrument / Software / Non-Instrument)
+    Stage 1 - Classify             : classify Excel items (Instrument / Software / Non-Instrument)
+    Stage 2 - Scraper              : crawl supplier websites, download PDFs
+                                     (only for rows classified Instrument/Software)
     Stage 2b - Supplier Resolution : resolve unknown suppliers via web search
     Stage 3 - Cross-ref            : link classified records to downloaded PDFs
+
+Classify runs BEFORE the scraper: the TYPE sorting gates which requisition
+rows feed the crawler, so vendors that only sold furniture, services, or
+consumables are never crawled at all.
 
 Configuration is read from ``pipeline_config.json`` in the same directory.
 Individual stages can be enabled / disabled in the ``pipeline`` section of
@@ -30,6 +35,7 @@ import logging
 import os
 import sys
 import time
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
@@ -165,56 +171,132 @@ def _extract_keyword_tokens(text: str) -> set[str]:
     return result
 
 
-def load_supplier_keywords(input_dir: str) -> dict[str, list[str]]:
-    """Read all CSV files from input_dir, extract Supplier Name and
-    Item Description, group by supplier, and return a dict mapping
+# Words that name a *document*, not a product. They are the same vocabulary the
+# scraper's _PDF_ALLOWLIST uses to recognise a product doc, so as keywords they
+# match every product doc a vendor publishes.
+_DOC_TYPE_WORDS = frozenset({
+    'catalog', 'catalogue', 'datasheet', 'sheet', 'spec', 'specs',
+    'specification', 'specifications', 'product', 'products', 'manual',
+    'guide', 'brochure', 'flyer', 'bulletin', 'literature', 'technical',
+    'install', 'installation', 'instruction', 'instructions', 'setup',
+    'configuration', 'maintenance', 'protocol', 'overview', 'reference',
+    'quickstart', 'pricelist', 'resource', 'resources', 'documentation',
+})
+
+# Category nouns: what a product *is*, not *which* product. "server" matches
+# every spec sheet Broadax publishes. The cross-vendor count below only catches
+# these when 2+ vendors share them, so the common ones are named outright.
+_CATEGORY_NOUNS = frozenset({
+    'server', 'servers', 'workstation', 'workstations', 'computer',
+    'computers', 'laptop', 'desktop', 'system', 'systems', 'software',
+    'hardware', 'equipment', 'instrument', 'instruments', 'device',
+    'devices', 'unit', 'units', 'kit', 'kits', 'accessory', 'accessories',
+    'module', 'modules', 'component', 'components', 'assembly', 'adapter',
+    'cable', 'cables', 'controller', 'monitor', 'printer', 'machine',
+    'machines', 'tool', 'tools', 'part', 'parts', 'item', 'items',
+    'model', 'series', 'replacement', 'upgrade', 'standard', 'support',
+    'service', 'services', 'solution', 'solutions', 'supplies', 'supply',
+})
+
+# A token shared by this many vendors or more is a category noun the list
+# above missed. Raising this loosens the filter.
+_MAX_VENDORS_PER_KEYWORD = 2
+
+
+def prune_generic_keywords(kw_sets: dict[str, set[str]]) -> dict[str, set[str]]:
+    """Keep only tokens that can actually identify one vendor's product.
+
+    Without this, a requisition for a single Gigabyte server yields the keyword
+    "server", which matches every spec sheet on the vendor's site. Three
+    passes: drop document-type words, drop category nouns, then drop tokens
+    that show up across vendors - what survives is distinctive to this
+    vendor's requisitions.
+
+    A vendor left with no keywords is dropped from the map, which the scraper
+    reads as "nothing relevant to look for" and skips the site entirely.
+    """
+    vendors_per_token = Counter()
+    for tokens in kw_sets.values():
+        vendors_per_token.update(set(tokens))
+
+    pruned: dict[str, set[str]] = {}
+    for supplier, tokens in kw_sets.items():
+        keep = {
+            t for t in tokens
+            if t not in _DOC_TYPE_WORDS
+            and t not in _CATEGORY_NOUNS
+            and vendors_per_token[t] < _MAX_VENDORS_PER_KEYWORD
+        }
+        if keep:
+            pruned[supplier] = keep
+    return pruned
+
+
+def load_supplier_keywords(labeled_dir: str) -> dict[str, list[str]]:
+    """Build per-supplier keyword sets from the classified (labeled) files.
+
+    Only rows the classify stage sorted as Instrument or Software feed the
+    scraper - a requisition line for office chairs or a shredding service
+    must never send the crawler to that vendor's site. Returns a dict of
     lowercase supplier name -> list of keyword tokens.
     """
     import pandas as pd
     from pathlib import Path
-    
-    input_path = Path(input_dir)
-    if not input_path.is_dir():
-        logger.warning("Input directory %s not found, skipping keyword loading", input_dir)
+
+    labeled_path = Path(labeled_dir)
+    labeled_files = sorted(labeled_path.glob("*_classified_v3.xlsx")) if labeled_path.is_dir() else []
+
+    if not labeled_files:
+        logger.warning("No classified files (*_classified_v3.xlsx) in %s - "
+                       "run the classify stage first", labeled_dir)
         return {}
-    
+
+    logger.info("Loading supplier keywords from %d classified file(s) in %s",
+                len(labeled_files), labeled_dir)
+
     supplier_keywords: dict[str, set[str]] = {}
-    csv_files = list(input_path.glob("*.csv"))
-    
-    if not csv_files:
-        logger.warning("No CSV files found in %s", input_dir)
-        return {}
-    
-    logger.info("Loading supplier keywords from %d CSV files in %s", len(csv_files), input_dir)
-    
-    for csv_file in csv_files:
+    total_rows = 0
+    kept_rows = 0
+
+    for xlsx in labeled_files:
         try:
-            df = pd.read_csv(csv_file)
-            # Verify required columns exist
-            if 'Supplier Name' not in df.columns or 'Item Description' not in df.columns:
-                logger.warning("CSV %s missing required columns (Supplier Name, Item Description), skipping", csv_file.name)
+            df = pd.read_excel(xlsx)
+            required = {'Supplier Name', 'Item Description', 'Type'}
+            missing = required - set(df.columns)
+            if missing:
+                logger.warning("%s missing required column(s) %s, skipping",
+                               xlsx.name, sorted(missing))
                 continue
-            
-            for _, row in df.iterrows():
-                supplier = str(row.get("Supplier Name", "")).strip()
-                description = str(row.get("Item Description", "")).strip()
+
+            total_rows += len(df)
+            wanted = df[df['Type'].astype(str).str.strip().str.lower()
+                        .isin(('instrument', 'software'))]
+            kept_rows += len(wanted)
+
+            for _, row in wanted.iterrows():
+                supplier = str(row['Supplier Name']).strip()
+                description = str(row['Item Description']).strip()
                 if not supplier or not description or description.lower() in ("nan", "nat", ""):
                     continue
-                keywords = _extract_keyword_tokens(description)
-                supplier_lower = supplier.lower()
-                if supplier_lower not in supplier_keywords:
-                    supplier_keywords[supplier_lower] = set()
-                supplier_keywords[supplier_lower].update(keywords)
-            
-            logger.info("  %s: %d rows processed", csv_file.name, len(df))
-            
+                supplier_keywords.setdefault(supplier.lower(), set()).update(
+                    _extract_keyword_tokens(description))
+
+            logger.info("  %s: %d of %d rows classified Instrument/Software",
+                        xlsx.name, len(wanted), len(df))
+
         except Exception as exc:
-            logger.error("Error reading %s: %s", csv_file.name, exc)
-    
+            logger.error("Error reading %s: %s", xlsx.name, exc)
+
+    raw_count = len(supplier_keywords)
+    supplier_keywords = prune_generic_keywords(supplier_keywords)
+
     total_keywords = sum(len(v) for v in supplier_keywords.values())
-    logger.info("Loaded %d keyword sets for %d suppliers (%d total tokens)",
-                len(supplier_keywords), len(supplier_keywords), total_keywords)
-    
+    logger.info("Keyword gate: %d of %d rows are Instrument/Software -> "
+                "%d supplier keyword sets (%d total tokens); "
+                "%d supplier(s) dropped - no distinctive keywords",
+                kept_rows, total_rows, len(supplier_keywords), total_keywords,
+                raw_count - len(supplier_keywords))
+
     return {k: list(v) for k, v in supplier_keywords.items()}
 
 
@@ -298,7 +380,7 @@ def run_data_cleaner(cfg: dict) -> bool:
 def run_scraper(cfg: dict) -> bool:
     """Stage 1: crawl supplier websites and download PDFs."""
     logger.info("=" * 60)
-    logger.info("STAGE 1 - SCRAPER")
+    logger.info("STAGE 2 - SCRAPER")
     logger.info("=" * 60)
 
     paths   = cfg.get("paths", {})
@@ -331,13 +413,17 @@ def run_scraper(cfg: dict) -> bool:
         allowlist_only           = scfg.get("allowlist_only", False),
     )
 
-    # Load supplier keywords from input CSVs for PDF filtering
-    input_excel_dir = paths.get("input_excel_dir", "")
-    if input_excel_dir:
-        supplier_keywords = load_supplier_keywords(input_excel_dir)
-        engine.supplier_keywords = supplier_keywords
-        logger.info("Loaded %d supplier keyword mappings for targeted PDF filtering",
-                    len(supplier_keywords))
+    # Keywords come from the classified files: only rows the sorting marked
+    # Instrument/Software feed the crawler. An empty engine.supplier_keywords
+    # would disable the per-PDF filter entirely, so refuse to crawl instead.
+    supplier_keywords = load_supplier_keywords(paths.get("labeled_dir", ""))
+    if not supplier_keywords:
+        logger.error("No Instrument/Software keywords from classified files - "
+                     "refusing to crawl unfiltered. Run the classify stage first.")
+        return False
+    engine.supplier_keywords = supplier_keywords
+    logger.info("Loaded %d supplier keyword mappings for targeted PDF filtering",
+                len(supplier_keywords))
 
     t0 = time.time()
     summary = engine.run(supplier_excel, pdf_dir)
@@ -353,7 +439,7 @@ def run_scraper(cfg: dict) -> bool:
 def run_classify(cfg: dict) -> bool:
     """Stage 2: classify every Excel file in the input directory (v3: Rules A, B, C)."""
     logger.info("=" * 60)
-    logger.info("STAGE 2 - CLASSIFY (v3: Prior Context + Supplier Metadata + Bundle Analysis)")
+    logger.info("STAGE 1 - CLASSIFY (v3: Prior Context + Supplier Metadata + Bundle Analysis)")
     logger.info("=" * 60)
 
     paths = cfg.get("paths", {})
@@ -597,18 +683,20 @@ def main():
             logger.error("Data cleaning failed - aborting pipeline (stop_on_failure=true)")
             sys.exit(1)
 
-    if stages["scraper"]:
-        ok = run_scraper(cfg)
-        results["scraper"] = ok
-        if not ok and stop_on_failure:
-            logger.error("Scraper failed - aborting pipeline (stop_on_failure=true)")
-            sys.exit(1)
-
+    # Classify BEFORE scraping: the TYPE sorting gates what the crawler
+    # looks for, so it must exist first.
     if stages["classify"]:
         ok = run_classify(cfg)
         results["classify"] = ok
         if not ok and stop_on_failure:
             logger.error("Classify failed - aborting pipeline (stop_on_failure=true)")
+            sys.exit(1)
+
+    if stages["scraper"]:
+        ok = run_scraper(cfg)
+        results["scraper"] = ok
+        if not ok and stop_on_failure:
+            logger.error("Scraper failed - aborting pipeline (stop_on_failure=true)")
             sys.exit(1)
 
     if stages["supplier_resolution"]:
