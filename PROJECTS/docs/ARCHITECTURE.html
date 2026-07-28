@@ -296,6 +296,79 @@ flowchart TB
     </div>
   </section>
 
+  <!-- ============ TECH STACK ============ -->
+  <section>
+    <div class="sec-head">
+      <span class="eyebrow">01b — Technology stack &amp; protocols</span>
+      <h2>What runs under the hood</h2>
+    </div>
+
+    <div class="col">
+      <h3>Runtime dependencies</h3>
+      <div class="tbl-scroll">
+        <table>
+          <thead><tr><th>Layer</th><th>Technology</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td>Language</td><td>Python 3.x (CPython)</td><td>Windows 11</td></tr>
+            <tr><td>HTTP client</td><td><code>requests</code> + <code>urllib3</code></td><td>All outbound web traffic; session-based with retry adapter</td></tr>
+            <tr><td>HTML parsing</td><td><code>beautifulsoup4</code> (html.parser)</td><td>Link extraction and search result scraping</td></tr>
+            <tr><td>Spreadsheet I/O</td><td><code>pandas</code> + <code>openpyxl</code> + <code>xlrd</code></td><td>All Excel/CSV read/write throughout the pipeline</td></tr>
+            <tr><td>PDF text extraction</td><td><code>PyPDF2</code> + <code>pdfplumber</code></td><td>crossref reads first-page text for relevance + matching</td></tr>
+            <tr><td>Desktop GUI</td><td><code>tkinter</code> (stdlib)</td><td>Manual crawl driver</td></tr>
+            <tr><td>Web dashboard</td><td>Flask + flask_cors</td><td>Status page at 0.0.0.0:443, self-signed TLS via openssl</td></tr>
+            <tr><td>File watcher</td><td><code>watchdog</code></td><td>Monitors input directory for new files</td></tr>
+            <tr><td>Database</td><td>SQLite 3 (stdlib)</td><td>Dedup/resume state only (<code>.scraper_dedup.db</code>)</td></tr>
+            <tr><td>Concurrency</td><td><code>threading</code> (stdlib)</td><td>Per-supplier crawl workers; debounce in watcher</td></tr>
+            <tr><td>Process parallelism</td><td><code>concurrent.futures.ProcessPoolExecutor</code></td><td>crossref PDF text extraction</td></tr>
+            <tr><td>Testing</td><td><code>pytest</code> + cov/mock/xdist</td><td>7 passing tests on the precision path</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="col">
+      <h3>Communication protocols</h3>
+      <p>All inter-component communication is <strong>in-process function calls</strong> &mdash; there
+        is no message bus, no RPC, no inter-service HTTP. The pipeline is a single Python
+        process that imports and calls each stage sequentially.</p>
+      <div class="tbl-scroll">
+        <table>
+          <thead><tr><th>Boundary</th><th>Protocol</th><th>Detail</th></tr></thead>
+          <tbody>
+            <tr><td>Orchestrator to stages</td><td>Python function call</td><td><code>importlib.util</code> dynamic import, then call the stage entry function</td></tr>
+            <tr><td>Scraper to vendor sites</td><td>HTTPS (TLS verified)</td><td><code>requests.Session</code> with HTTPAdapter + exponential backoff on 429/5xx</td></tr>
+            <tr><td>Scraper to search engines</td><td>HTTPS POST / GET</td><td>DuckDuckGo HTML form POST, Bing HTML GET; no API keys</td></tr>
+            <tr><td>Scraper to robots/sitemap</td><td>HTTP(S) GET</td><td>Standard robots exclusion + XML sitemap parsing</td></tr>
+            <tr><td>Watcher to pipeline</td><td><code>subprocess.run</code></td><td><code>watch_input.py</code> spawns <code>python pipeline.py</code> as child process</td></tr>
+            <tr><td>Dashboard to operator</td><td>HTTPS (self-signed) / HTTP fallback</td><td>Flask dev server; JSON at <code>/api/status</code>, HTML at <code>/</code></td></tr>
+            <tr><td>Dedup state</td><td>SQLite file I/O</td><td>Thread-safe; single writer, file lock</td></tr>
+            <tr><td>Stage-to-stage data</td><td>Local filesystem</td><td>Each stage reads previous stage's output files from disk (xlsx/csv/pdf)</td></tr>
+            <tr><td>Config</td><td>JSON file read</td><td><code>pipeline_config.json</code> loaded once at pipeline start</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="col">
+      <h3>HTTP session configuration</h3>
+      <p>The scraper's <code>_make_session()</code> factory produces a <code>requests.Session</code> with:</p>
+      <ul>
+        <li><strong>User-Agent</strong>: Chrome 120 on Windows 10 (deliberate impersonation to avoid bot blocks)</li>
+        <li><strong>Retry</strong>: 3 attempts, backoff factor 1.0, on status 429/500/502/503/504</li>
+        <li><strong>Allowed methods</strong>: HEAD and GET only</li>
+        <li><strong>Adapters</strong>: <code>HTTPAdapter</code> mounted on both <code>http://</code> and <code>https://</code></li>
+        <li><strong>Rate limiting</strong>: <code>_DomainRateLimiter</code> enforces 2.0s between requests to same domain, max 3 concurrent suppliers</li>
+      </ul>
+    </div>
+
+    <div class="col">
+      <h3>What is NOT used</h3>
+      <p>No Django, no FastAPI, no Celery, no Redis, no RabbitMQ, no Docker, no cloud
+        services, no API keys, no OAuth. The system is intentionally a local-only
+        single-machine batch pipeline with minimal dependencies.</p>
+    </div>
+  </section>
+
   <!-- ============ DATA FLOW ============ -->
   <section>
     <div class="sec-head">
