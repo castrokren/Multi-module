@@ -425,7 +425,8 @@ flowchart LR
         <tbody>
           <tr><td class="mono">C:/Data/Crawler/input</td><td>xlsx / csv</td><td>Humans, upstream procurement</td><td>data_cleaner, classify</td></tr>
           <tr><td class="mono">C:/Data/Crawler/labeled</td><td>xlsx, 6 cols incl. Type + Unit Price</td><td>classify</td><td>scraper (keywords), crossref</td></tr>
-          <tr><td class="mono">C:/Data/Crawler/output</td><td>PDF, foldered per supplier</td><td>ScraperEngine</td><td>crossref</td></tr>
+          <tr><td class="mono">C:/Data/Crawler/output</td><td>PDF, foldered per supplier</td><td>ScraperEngine</td><td>crossref; purged after 30 days if unmatched</td></tr>
+          <tr><td class="mono">C:/Data/Crawler/review</td><td>PDF copies, timestamped subfolder</td><td>pipeline (post-crossref)</td><td>Humans; purged after 30 days</td></tr>
           <tr><td class="mono">…/output/.scraper_dedup.db</td><td>SQLite</td><td>ScraperEngine</td><td>ScraperEngine (resume)</td></tr>
           <tr><td class="mono">PROJECTS/data/masterlist/updated_master_list.xlsx</td><td>xlsx</td><td>Humans</td><td>scraper, crossref</td></tr>
           <tr><td class="mono">cross-reference/results/</td><td>xlsx, timestamped</td><td>crossref</td><td>Humans</td></tr>
@@ -577,10 +578,16 @@ flowchart TB
         <h3>crossref</h3>
         <div class="io">
           <div><dt>in</dt><dd>most recent labeled xlsx + master list + PDF dir</dd></div>
-          <div><dt>out</dt><dd>cross-reference/results/crossref_results_&lt;ts&gt;.xlsx</dd></div>
+          <div><dt>out</dt><dd>cross-reference/results/crossref_results_&lt;ts&gt;.xlsx + C:/Data/Crawler/review/&lt;ts&gt;/</dd></div>
           <div><dt>code</dt><dd>cross-reference/crossref_standalone_fast.py → CrossReferenceEngine</dd></div>
         </div>
         <p>Fuzzy-matches line items against the master list and the text of the downloaded PDFs at threshold 60, in low-CPU mode by default, then exports a timestamped results workbook. The last validated run matched 6 items.</p>
+        <h4>Post-crossref housekeeping</h4>
+        <ol>
+          <li><strong>Matched PDF collection</strong> — copies every matched PDF into <code>C:/Data/Crawler/review/&lt;timestamp&gt;/</code> for manual inspection alongside the results spreadsheet.</li>
+          <li><strong>Review purge</strong> — deletes review folders older than 30 days.</li>
+          <li><strong>Unmatched PDF purge</strong> — deletes PDFs in <code>output/</code> older than 30 days that were not in the current match set. The dedup DB retains their hashes so they will not be re-downloaded.</li>
+        </ol>
       </div>
     </div>
   </section>

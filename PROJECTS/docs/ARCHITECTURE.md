@@ -182,7 +182,8 @@ discarded. The rust node is the only place data leaves the machine.
 |---|---|---|---|
 | `C:/Data/Crawler/input` | xlsx / csv | Humans, upstream procurement | data_cleaner, classify |
 | `C:/Data/Crawler/labeled` | xlsx, 6 cols incl. Type + Unit Price | classify | scraper (keywords), crossref |
-| `C:/Data/Crawler/output` | PDF, foldered per supplier | ScraperEngine | crossref |
+| `C:/Data/Crawler/output` | PDF, foldered per supplier | ScraperEngine | crossref; purged after 30 days if unmatched |
+| `C:/Data/Crawler/review` | PDF copies, timestamped subfolder | pipeline (post-crossref) | Humans; purged after 30 days |
 | `…/output/.scraper_dedup.db` | SQLite | ScraperEngine | ScraperEngine (resume) |
 | `PROJECTS/data/masterlist/updated_master_list.xlsx` | xlsx | Humans | scraper, crossref |
 | `cross-reference/results/` | xlsx, timestamped | crossref | Humans |
@@ -311,12 +312,22 @@ scraper imports its DuckDuckGo and Bing helpers for discovery route 2.
 ### 4 · crossref
 
 - **in** most recent labeled xlsx + master list + PDF dir
-- **out** `cross-reference/results/crossref_results_<ts>.xlsx`
+- **out** `cross-reference/results/crossref_results_<ts>.xlsx` + `C:/Data/Crawler/review/<ts>/`
 - **code** `cross-reference/crossref_standalone_fast.py` → `CrossReferenceEngine`
 
 Fuzzy-matches line items against the master list and the text of the downloaded
 PDFs at threshold 60, in low-CPU mode by default, then exports a timestamped
 results workbook. The last validated run matched 6 items.
+
+**Post-crossref housekeeping** (in `pipeline.py`):
+
+1. **Matched PDF collection** — copies every matched PDF into
+   `C:/Data/Crawler/review/<timestamp>/` for manual inspection alongside the
+   results spreadsheet.
+2. **Review purge** — deletes review folders older than 30 days.
+3. **Unmatched PDF purge** — deletes PDFs in `output/` older than 30 days that
+   were not in the current match set. The dedup DB retains their hashes so they
+   will not be re-downloaded.
 
 ---
 

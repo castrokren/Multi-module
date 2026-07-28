@@ -33,6 +33,7 @@ import importlib.util
 import json
 import logging
 import os
+import shutil
 import sys
 import time
 from collections import Counter
@@ -593,10 +594,62 @@ def run_crossref(cfg: dict) -> bool:
         engine.export_results(output_file)
         logger.info("Cross-ref finished in %.0f s - %d match(es) saved to %s",
                     elapsed, len(engine.results), output_file)
+
+        # Copy matched PDFs to a review directory for manual inspection
+        review_dir = Path(paths.get("review_dir", "C:/Data/Crawler/review")) / ts
+        _collect_matched_pdfs(engine.results, review_dir)
+
+        # Purge output PDFs older than 30 days that never matched
+        matched_paths = {Path(r["Matched PDF"]).resolve()
+                        for r in engine.results if r.get("Matched PDF")}
+        _purge_unmatched_pdfs(Path(pdf_dir), matched_paths, days=30)
     else:
         logger.error("Cross-ref failed after %.0f s", elapsed)
 
     return success
+
+
+def _collect_matched_pdfs(results: list, review_dir: Path) -> None:
+    """Copy matched PDFs into a timestamped review folder."""
+    if not results:
+        return
+    review_dir.mkdir(parents=True, exist_ok=True)
+    copied = 0
+    for r in results:
+        src = Path(r.get("Matched PDF", ""))
+        if src.is_file():
+            shutil.copy2(src, review_dir / src.name)
+            copied += 1
+    logger.info("Copied %d matched PDF(s) to %s", copied, review_dir)
+    _purge_old_reviews(review_dir.parent, days=30)
+
+
+def _purge_old_reviews(review_root: Path, days: int = 30) -> None:
+    """Delete review subdirectories older than `days`."""
+    if not review_root.is_dir():
+        return
+    cutoff = time.time() - days * 86400
+    for d in review_root.iterdir():
+        if d.is_dir() and d.stat().st_mtime < cutoff:
+            shutil.rmtree(d, ignore_errors=True)
+            logger.info("Purged old review folder: %s", d.name)
+
+
+def _purge_unmatched_pdfs(output_dir: Path, matched: set, days: int = 30) -> None:
+    """Delete PDFs in output/ older than `days` that are not in the matched set."""
+    if not output_dir.is_dir():
+        return
+    cutoff = time.time() - days * 86400
+    purged = 0
+    for pdf in output_dir.rglob("*.pdf"):
+        if pdf.resolve() in matched:
+            continue
+        if pdf.stat().st_mtime < cutoff:
+            pdf.unlink(missing_ok=True)
+            purged += 1
+    if purged:
+        logger.info("Purged %d unmatched PDF(s) older than %d days from %s",
+                    purged, days, output_dir)
 
 
 # ---------------------------------------------------------------------------
