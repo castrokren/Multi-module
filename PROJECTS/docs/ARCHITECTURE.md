@@ -78,6 +78,61 @@ flowchart TB
 
 ---
 
+## 1b. Technology stack & protocols
+
+### Runtime
+
+| Layer | Technology | Version / Notes |
+|---|---|---|
+| Language | Python 3.x | CPython on Windows 11 |
+| HTTP client | `requests` + `urllib3` | All outbound web traffic; session-based with retry adapter |
+| HTML parsing | `beautifulsoup4` (html.parser) | Extracts links and search results from HTML pages |
+| Spreadsheet I/O | `pandas` + `openpyxl` + `xlrd` | All Excel/CSV read/write throughout the pipeline |
+| PDF text extraction | `PyPDF2` + `pdfplumber` | crossref stage reads first-page text for relevance + matching |
+| Desktop GUI | `tkinter` (stdlib) | Manual crawl driver, `pdf_crawler_gui_2.py` |
+| Web dashboard | Flask + flask_cors | Status page at `0.0.0.0:443`, self-signed TLS via `openssl` CLI |
+| File watcher | `watchdog` | `watch_input.py` monitors input directory for new files |
+| Database | SQLite 3 (stdlib `sqlite3`) | Dedup/resume state only (`.scraper_dedup.db`) |
+| Concurrency | `threading` (stdlib) | Per-supplier crawl workers; `threading.Event` debounce in watcher |
+| Process parallelism | `concurrent.futures.ProcessPoolExecutor` | crossref stage's PDF text extraction |
+| Testing | `pytest` + `pytest-cov` + `pytest-mock` + `pytest-xdist` | 7 passing tests on the precision path |
+
+### Communication protocols
+
+All inter-component communication is **in-process function calls** — there is
+no message bus, no RPC, no inter-service HTTP. The pipeline is a single Python
+process that imports and calls each stage sequentially.
+
+| Boundary | Protocol | Detail |
+|---|---|---|
+| Pipeline orchestrator to stages | Python function call | `importlib.util` dynamic import, then call the stage's entry function |
+| Scraper to vendor websites | HTTPS (TLS verified) | `requests.Session` with `HTTPAdapter` + exponential backoff retries on 429/5xx |
+| Scraper to search engines | HTTPS POST (DuckDuckGo) / HTTPS GET (Bing) | HTML scraping of public search results; no API keys |
+| Scraper to robots.txt / sitemap | HTTP(S) GET | Standard robots exclusion + XML sitemap parsing |
+| Watcher to pipeline | `subprocess.run` | `watch_input.py` spawns `python pipeline.py` as a child process |
+| Dashboard to operator | HTTPS (self-signed) / HTTP fallback | Flask dev server, JSON at `/api/status`, HTML at `/` |
+| Dedup state | SQLite file I/O | Thread-safe `check_same_thread=False`; single writer, file lock |
+| Stage-to-stage data | Local filesystem (xlsx/csv/pdf) | Each stage reads the previous stage's output files from disk |
+| Config | JSON file read | `pipeline_config.json` loaded once at pipeline start |
+
+### HTTP session configuration
+
+The scraper's `_make_session()` factory produces a `requests.Session` with:
+
+- **User-Agent**: Chrome 120 on Windows 10 (deliberate impersonation to avoid bot blocks)
+- **Retry**: 3 attempts, backoff factor 1.0, on status codes 429/500/502/503/504
+- **Allowed methods**: HEAD and GET only
+- **Adapters**: `HTTPAdapter` mounted on both `http://` and `https://` schemes
+- **Rate limiting**: `_DomainRateLimiter` enforces 2.0s between requests to the same domain, max 3 concurrent suppliers
+
+### What is NOT used
+
+No Django, no FastAPI, no Celery, no Redis, no RabbitMQ, no Docker, no cloud
+services, no API keys, no OAuth. The system is intentionally a local-only
+single-machine batch pipeline with minimal dependencies.
+
+---
+
 ## 2. Data flow
 
 No database server, no cloud storage. Everything is files on local disk, and all
