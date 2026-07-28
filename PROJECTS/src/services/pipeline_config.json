@@ -8,7 +8,8 @@
     "labeled_dir":     "C:/Data/Crawler/labeled",
     "master_excel":    "data/masterlist/updated_master_list.xlsx",
     "master_list":     "data/masterlist/updated_master_list.xlsx",
-    "results_dir":     "src/services/cross-reference/results"
+    "results_dir":     "src/services/cross-reference/results",
+    "review_dir":      "C:/Data/Crawler/review"
   },
 
   "pipeline": {
