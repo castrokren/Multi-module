@@ -71,3 +71,12 @@ Thumbs.db
 learning_log.json
 monitor_config.json.bak
 *.bak
+# === Secret protection (security remediation)
+.env
+*.pem
+*.key
+*.pfx
+*.p12
+config.json
+credentials.json
+passcode.dat
