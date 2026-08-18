@@ -1,0 +1,21 @@
+{
+  "watch_directory": "C:/Data/Crawler/input",
+  "output_directory": "C:/Data/Crawler/output",
+  "hardware_keywords_file": "research_instrument_keywords.txt",
+  "software_keywords_file": "software_keywords.txt",
+  "non_instrument_keywords_file": "non_instrument_keywords.txt",
+  "file_extensions": [
+    ".xls",
+    ".xlsx"
+  ],
+  "ignore_temp_files": true,
+  "ignore_labeled_files": true,
+  "service_name": "CrawlerMonitor",
+  "service_display_name": "Crawler Folder Monitor",
+  "service_description": "Monitors a folder and processes Excel files when added or changed.",
+  "log_level": "INFO",
+  "process_timeout": 30,
+  "learning_mode": true,
+  "min_occurrences": 5,
+  "confidence_threshold": 0.7
+}

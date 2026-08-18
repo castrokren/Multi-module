@@ -1,0 +1,7 @@
+{
+  "service_path": "C:/Projects/Crawler/PROJECTS/src/services/classify/simple_monitor.py",
+  "classify_path": "C:/Projects/Crawler/PROJECTS/src/services/classify/classify_and_clean_dynamic.py",
+  "watch_dir": "Y:\\SOM_in",
+  "startup_type": "manual",
+  "interactive": false
+}

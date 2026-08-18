@@ -24,6 +24,18 @@ import gc
 import configparser
 from dataclasses import dataclass
 
+# Crawling is delegated to the shared ScraperEngine (same engine as the
+# pipeline): relevance + keyword filters, per-domain rate limiting, dedup DB.
+from scraper_engine import ScraperEngine
+
+# Keyword tokenizer shared with the pipeline orchestrator
+try:
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+    from pipeline import _extract_keyword_tokens, prune_generic_keywords
+except ImportError:
+    _extract_keyword_tokens = None
+    prune_generic_keywords = None
+
 # Enhanced logging system
 import logging
 
@@ -54,7 +66,7 @@ vv_log("Starting application initialization...")
 vv_log("All imports completed successfully")
 
 # ---------------------------------------------------------------------------
-# Verify that top-level imports succeeded (log only — no re-import needed)
+# Verify that top-level imports succeeded (log only - no re-import needed)
 # ---------------------------------------------------------------------------
 for _mod_name, _obj in (
     ("pandas",        pd),
@@ -139,66 +151,23 @@ class CrawlerConfig:
         with open(config_path, 'w') as f:
             config.write(f)
 
-# Rate-limited adapter for security and politeness
-class RateLimitedAdapter(HTTPAdapter):
-    """HTTP adapter with rate limiting to be respectful to websites"""
-    def __init__(self, *args, **kwargs):
-        self.last_request = 0
-        self.min_interval = config.request_delay  # Minimum interval between requests
-        super().__init__(*args, **kwargs)
-    
-    def send(self, request, **kwargs):
-        elapsed = time.time() - self.last_request
-        if elapsed < self.min_interval:
-            time.sleep(self.min_interval - elapsed)
-        self.last_request = time.time()
-        return super().send(request, **kwargs)
-
-# Security and validation functions
-def validate_url(url):
-    """Validate URL for security"""
-    try:
-        parsed = urlparse(url)
-        if parsed.scheme not in ['http', 'https']:
-            return False
-        if not parsed.netloc:
-            return False
-        # Block localhost and private IPs for security
-        if 'localhost' in parsed.netloc or '127.0.0.1' in parsed.netloc:
-            return False
-        return True
-    except Exception:
-        return False
-
-def sanitize_path(path):
-    """Sanitize file paths to prevent directory traversal"""
-    import os.path
-    # Remove any path traversal attempts
-    path = path.replace('..', '').replace('/', '_').replace('\\', '_')
-    # Remove or replace dangerous characters
-    dangerous_chars = '<>:"|?*'
-    for char in dangerous_chars:
-        path = path.replace(char, '_')
-    return path
-
-def calculate_file_hash(file_path):
-    """Calculate SHA-256 hash of a file for integrity checking"""
-    try:
-        hash_sha256 = hashlib.sha256()
-        with open(file_path, "rb") as f:
-            for chunk in iter(lambda: f.read(4096), b""):
-                hash_sha256.update(chunk)
-        return hash_sha256.hexdigest()
-    except Exception:
-        return None
-
 # Load configuration
 config = CrawlerConfig.from_file()
 
-MAX_CONCURRENT = config.max_concurrent
-PAGE_TIMEOUT = config.page_timeout
-REQUEST_DELAY = config.request_delay
-MAX_PAGES_PER_SITE = config.max_pages_per_site
+
+class _TkLogHandler(logging.Handler):
+    """Forward scraper_engine log records into the GUI log area."""
+
+    def __init__(self, app):
+        super().__init__(level=logging.INFO)
+        self.app = app
+
+    def emit(self, record):
+        try:
+            level = {"WARNING": "warning", "ERROR": "error"}.get(record.levelname, "info")
+            self.app.log(record.getMessage(), level)
+        except Exception:
+            pass
 
 def check_single_instance():
     """Check if another instance is already running."""
@@ -210,7 +179,7 @@ def check_single_instance():
         vv_log("✅ Single instance check passed")
         return True
     except OSError:
-        vv_log("❌ Another instance is already running")
+        vv_log("[ERROR] Another instance is already running")
         return False
 
 class PDFCrawlerEnhancedApp:
@@ -249,8 +218,7 @@ class PDFCrawlerEnhancedApp:
         # --- Internal state ---
         self.running = False
         self.visited = set()
-        vv_log("Creating session...")
-        self.session = self.create_session()
+        self.engine = None  # ScraperEngine instance while a crawl is active
         self.download_folder = None
         self.start_time = None
         self.timer_running = False
@@ -269,60 +237,15 @@ class PDFCrawlerEnhancedApp:
         
         vv_log("✅ PDFCrawlerEnhancedApp initialization complete")
 
-    def create_session(self):
-        """Create a secure, rate-limited requests session with enhanced retry strategy."""
-        vv_log("Creating secure requests session...")
-        session = requests.Session()
-        
-        # Configure enhanced retry strategy
-        retry_strategy = Retry(
-            total=config.max_retries,
-            backoff_factor=1.5,  # Increased backoff
-            status_forcelist=[429, 500, 502, 503, 504, 522, 524],
-            allowed_methods=["GET", "POST"],
-            raise_on_status=False
-        )
-        
-        # Use rate-limited adapter for security and politeness
-        adapter = RateLimitedAdapter(
-            max_retries=retry_strategy,
-            pool_connections=100,
-            pool_maxsize=100
-        )
-        session.mount("http://", adapter)
-        session.mount("https://", adapter)
-        
-        # Enable SSL verification for security
-        session.verify = True
-        
-        # Set security-conscious headers
-        session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.5',
-            'Accept-Encoding': 'gzip, deflate',
-            'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1',
-            'DNT': '1',  # Do Not Track
-            'Sec-Fetch-Dest': 'document',
-            'Sec-Fetch-Mode': 'navigate',
-            'Sec-Fetch-Site': 'none'
-        })
-        
-        vv_log("✅ Secure, rate-limited session created successfully")
-        return session
-    
     def optimize_memory(self):
         """Clear unused variables and force garbage collection"""
         try:
-            if hasattr(self, 'session'):
-                self.session.close()
             if hasattr(self, 'vendor_data'):
                 self.vendor_data.clear()
             gc.collect()
             vv_log("✅ Memory optimization completed")
         except Exception as e:
-            vv_log(f"⚠️ Memory optimization warning: {e}")
+            vv_log(f"[WARNING]️ Memory optimization warning: {e}")
     
     def setup_stats_panel(self, parent_frame):
         """Set up real-time statistics panel"""
@@ -346,7 +269,7 @@ class PDFCrawlerEnhancedApp:
             vv_log("✅ Statistics panel setup complete")
             
         except Exception as e:
-            vv_log(f"❌ Failed to setup stats panel: {e}")
+            vv_log(f"[ERROR] Failed to setup stats panel: {e}")
     
     def update_stats(self):
         """Update real-time statistics"""
@@ -362,7 +285,7 @@ class PDFCrawlerEnhancedApp:
                 if self.running:
                     self.master.after(2000, self.update_stats)
         except Exception as e:
-            vv_log(f"⚠️ Stats update warning: {e}")
+            vv_log(f"[WARNING]️ Stats update warning: {e}")
 
     def setup_crawler_tab(self):
         vv_log("Setting up crawler tab...")
@@ -802,20 +725,20 @@ class PDFCrawlerEnhancedApp:
             
             # Validate inputs
             if not all([input_file, master_file, pdf_dir]):
-                self.log_crossref("❌ Missing required inputs", "error")
+                self.log_crossref("[ERROR] Missing required inputs", "error")
                 return
             
             # Validate files exist
             if not os.path.exists(input_file):
-                self.log_crossref(f"❌ Input file not found: {input_file}", "error")
+                self.log_crossref(f"[ERROR] Input file not found: {input_file}", "error")
                 return
             
             if not os.path.exists(master_file):
-                self.log_crossref(f"❌ Master file not found: {master_file}", "error")
+                self.log_crossref(f"[ERROR] Master file not found: {master_file}", "error")
                 return
             
             if not os.path.exists(pdf_dir):
-                self.log_crossref(f"❌ PDF directory not found: {pdf_dir}", "error")
+                self.log_crossref(f"[ERROR] PDF directory not found: {pdf_dir}", "error")
                 return
             
             self.log_crossref("✅ File validation passed")
@@ -837,13 +760,13 @@ class PDFCrawlerEnhancedApp:
                 # Limit items for testing (can be adjusted)
                 max_items = 10  # Process 10 items at a time
                 if len(input_df) > max_items:
-                    self.log_crossref(f"⚠️ Limiting to first {max_items} items for testing")
+                    self.log_crossref(f"[WARNING]️ Limiting to first {max_items} items for testing")
                     input_df = input_df.head(max_items)
                     self.crossref_log_area.see(END)
                     self.master.update()
                 
             except Exception as e:
-                self.log_crossref(f"❌ Failed to load input file: {e}", "error")
+                self.log_crossref(f"[ERROR] Failed to load input file: {e}", "error")
                 return
             
             self.log_crossref("Loading master Excel file...")
@@ -856,7 +779,7 @@ class PDFCrawlerEnhancedApp:
                 self.crossref_log_area.see(END)
                 self.master.update()
             except Exception as e:
-                self.log_crossref(f"❌ Failed to load master file: {e}", "error")
+                self.log_crossref(f"[ERROR] Failed to load master file: {e}", "error")
                 return
             
             # Initialize supplier mapping
@@ -919,7 +842,7 @@ class PDFCrawlerEnhancedApp:
                 self.crossref_log_area.see(END)
                 self.master.update()
             except Exception as e:
-                self.log_crossref(f"❌ Error counting PDFs: {e}", "error")
+                self.log_crossref(f"[ERROR] Error counting PDFs: {e}", "error")
                 return
             
             # Process items
@@ -970,13 +893,13 @@ class PDFCrawlerEnhancedApp:
                             'matches': matches
                         }
                     else:
-                        self.log_crossref(f"❌ Item {item_code}: No matches")
+                        self.log_crossref(f"[ERROR] Item {item_code}: No matches")
                     
                     self.crossref_log_area.see(END)
                     self.master.update()
                 
                 except Exception as e:
-                    self.log_crossref(f"❌ Error processing item {item_code}: {e}", "error")
+                    self.log_crossref(f"[ERROR] Error processing item {item_code}: {e}", "error")
                     continue
             
             # Final summary
@@ -1003,7 +926,7 @@ class PDFCrawlerEnhancedApp:
             self.populate_crossref_results()
             
         except Exception as e:
-            self.log_crossref(f"❌ Cross-reference analysis failed: {e}", "error")
+            self.log_crossref(f"[ERROR] Cross-reference analysis failed: {e}", "error")
             traceback.print_exc()
             
             # Create backup log for error case
@@ -1030,7 +953,7 @@ class PDFCrawlerEnhancedApp:
             vv_log(f"    Found {len(supplier_folders)} supplier folders")
             
             if not supplier_folders:
-                vv_log("    ❌ No supplier folders found")
+                vv_log("    [ERROR] No supplier folders found")
                 return matches
             
             # Process each supplier folder
@@ -1044,7 +967,7 @@ class PDFCrawlerEnhancedApp:
                     vv_log("      Checking master file...")
                     supplier_info = master_df[master_df['Supplier Name'] == supplier_folder]
                     if supplier_info.empty:
-                        vv_log(f"      ❌ Supplier '{supplier_folder}' not in master file")
+                        vv_log(f"      [ERROR] Supplier '{supplier_folder}' not in master file")
                         continue
                     
                     vv_log("      ✅ Supplier found in master file")
@@ -1055,7 +978,7 @@ class PDFCrawlerEnhancedApp:
                     vv_log(f"      Found {len(pdf_files)} PDF files")
                     
                     if not pdf_files:
-                        vv_log("      ❌ No PDF files in supplier folder")
+                        vv_log("      [ERROR] No PDF files in supplier folder")
                         continue
                     
                     # Process each PDF
@@ -1070,7 +993,7 @@ class PDFCrawlerEnhancedApp:
                             pdf_text = self.extract_pdf_text(pdf_path)
                             
                             if not pdf_text:
-                                vv_log("          ❌ Could not extract text")
+                                vv_log("          [ERROR] Could not extract text")
                                 continue
                             
                             vv_log(f"          ✅ Extracted {len(pdf_text)} characters")
@@ -1089,21 +1012,21 @@ class PDFCrawlerEnhancedApp:
                                     'text': pdf_text[:200] + '...' if len(pdf_text) > 200 else pdf_text
                                 })
                             else:
-                                vv_log(f"          ❌ No match (score {score:.1f}% < {threshold}%)")
+                                vv_log(f"          [ERROR] No match (score {score:.1f}% < {threshold}%)")
                         
                         except Exception as e:
-                            vv_log(f"          ❌ Error processing PDF {pdf_file}: {e}")
+                            vv_log(f"          [ERROR] Error processing PDF {pdf_file}: {e}")
                             continue
                 
                 except Exception as e:
-                    vv_log(f"    ❌ Error processing supplier {supplier_folder}: {e}")
+                    vv_log(f"    [ERROR] Error processing supplier {supplier_folder}: {e}")
                     continue
             
             vv_log(f"    === MATCHING COMPLETE FOR {item_code} ===")
             vv_log(f"    Found {len(matches)} matches")
             
         except Exception as e:
-            vv_log(f"    ❌ Error in find_matching_pdfs: {e}")
+            vv_log(f"    [ERROR] Error in find_matching_pdfs: {e}")
             traceback.print_exc()
         
         return matches
@@ -1120,7 +1043,7 @@ class PDFCrawlerEnhancedApp:
                 return matches
             
             if not supplier_name:
-                self.log_crossref(f"    ❌ No supplier name found for item")
+                self.log_crossref(f"    [ERROR] No supplier name found for item")
                 self.crossref_log_area.see(END)
                 self.master.update()
                 return matches
@@ -1140,7 +1063,7 @@ class PDFCrawlerEnhancedApp:
             # Check if supplier folder exists
             supplier_path = os.path.join(pdf_dir, pdf_folder_name)
             if not os.path.exists(supplier_path):
-                self.log_crossref(f"    ❌ Supplier folder not found: {pdf_folder_name}")
+                self.log_crossref(f"    [ERROR] Supplier folder not found: {pdf_folder_name}")
                 # Try to find a similar folder name
                 available_folders = [d for d in os.listdir(pdf_dir) if os.path.isdir(os.path.join(pdf_dir, d))]
                 self.log_crossref(f"    Available folders: {available_folders[:5]}...")  # Show first 5
@@ -1156,7 +1079,7 @@ class PDFCrawlerEnhancedApp:
             pdf_files = [f for f in os.listdir(supplier_path) if f.lower().endswith('.pdf')]
             
             if not pdf_files:
-                self.log_crossref(f"      ❌ No PDF files in {supplier_name}")
+                self.log_crossref(f"      [ERROR] No PDF files in {supplier_name}")
                 self.crossref_log_area.see(END)
                 self.master.update()
                 return matches
@@ -1186,7 +1109,7 @@ class PDFCrawlerEnhancedApp:
                     self.master.update()
                     
                     if not pdf_text:
-                        self.log_crossref(f"          ❌ No text extracted")
+                        self.log_crossref(f"          [ERROR] No text extracted")
                         self.crossref_log_area.see(END)
                         self.master.update()
                         continue
@@ -1211,13 +1134,13 @@ class PDFCrawlerEnhancedApp:
                             'text': pdf_text[:200] + '...' if len(pdf_text) > 200 else pdf_text
                         })
                     else:
-                        self.log_crossref(f"          ❌ No match (score {score:.1f}% < {threshold}%)")
+                        self.log_crossref(f"          [ERROR] No match (score {score:.1f}% < {threshold}%)")
                     
                     self.crossref_log_area.see(END)
                     self.master.update()
                 
                 except Exception as e:
-                    self.log_crossref(f"          ❌ Error processing PDF {pdf_file}: {e}")
+                    self.log_crossref(f"          [ERROR] Error processing PDF {pdf_file}: {e}")
                     self.crossref_log_area.see(END)
                     self.master.update()
                     continue
@@ -1227,7 +1150,7 @@ class PDFCrawlerEnhancedApp:
             self.master.update()
             
         except Exception as e:
-            self.log_crossref(f"❌ Error in find_matching_pdfs_improved: {e}")
+            self.log_crossref(f"[ERROR] Error in find_matching_pdfs_improved: {e}")
             self.crossref_log_area.see(END)
             self.master.update()
         
@@ -1261,7 +1184,7 @@ class PDFCrawlerEnhancedApp:
             return unique_keywords
         
         except Exception as e:
-            vv_log(f"        ❌ Error extracting keywords: {e}")
+            vv_log(f"        [ERROR] Error extracting keywords: {e}")
             return []
 
     def extract_pdf_text(self, pdf_path):
@@ -1279,10 +1202,10 @@ class PDFCrawlerEnhancedApp:
                 if text and len(text.strip()) > config.min_text_length:  # Configurable text threshold
                     return text
             except Exception as e:
-                vv_log(f"          ⚠️ Method failed: {e}")
+                vv_log(f"          [WARNING]️ Method failed: {e}")
                 continue
         
-        vv_log("          ❌ All extraction methods failed")
+        vv_log("          [ERROR] All extraction methods failed")
         return ""
     
     def _extract_with_pypdf2(self, pdf_path, timeout_seconds=30):
@@ -1302,9 +1225,9 @@ class PDFCrawlerEnhancedApp:
                     )
                 result_holder[0] = text.strip()
             except FileNotFoundError:
-                vv_log(f"          ❌ PDF file not found: {pdf_path}", "error")
+                vv_log(f"          [ERROR] PDF file not found: {pdf_path}", "error")
             except PermissionError:
-                vv_log(f"          ❌ Permission denied accessing: {pdf_path}", "error")
+                vv_log(f"          [ERROR] Permission denied accessing: {pdf_path}", "error")
             except Exception as e:
                 error_holder[0] = e
 
@@ -1313,11 +1236,11 @@ class PDFCrawlerEnhancedApp:
         worker.join(timeout=timeout_seconds)
 
         if worker.is_alive():
-            vv_log(f"          ⚠️ PyPDF2 timed out after {timeout_seconds}s — skipping", "warning")
+            vv_log(f"          [WARNING]️ PyPDF2 timed out after {timeout_seconds}s - skipping", "warning")
             return ""
 
         if error_holder[0]:
-            vv_log(f"          ❌ PyPDF2 extraction failed: {error_holder[0]}", "error")
+            vv_log(f"          [ERROR] PyPDF2 extraction failed: {error_holder[0]}", "error")
             return ""
 
         text = result_holder[0] or ""
@@ -1346,7 +1269,7 @@ class PDFCrawlerEnhancedApp:
         
         try:
             if not keywords or not pdf_text:
-                vv_log("          ❌ No keywords or PDF text available")
+                vv_log("          [ERROR] No keywords or PDF text available")
                 return 0.0
             
             pdf_text_lower = pdf_text.lower()
@@ -1387,7 +1310,7 @@ class PDFCrawlerEnhancedApp:
             return final_score
         
         except Exception as e:
-            vv_log(f"          ❌ Error calculating match score: {e}")
+            vv_log(f"          [ERROR] Error calculating match score: {e}")
             return 0.0
     
     def _calculate_keyword_frequency(self, keywords, pdf_text):
@@ -1484,8 +1407,8 @@ class PDFCrawlerEnhancedApp:
             vv_log(f"✅ Comprehensive reports exported with timestamp: {timestamp}")
             
         except Exception as e:
-            self.log_crossref(f"❌ Failed to export results: {str(e)}", "error")
-            vv_log(f"❌ Failed to export results: {str(e)}")
+            self.log_crossref(f"[ERROR] Failed to export results: {str(e)}", "error")
+            vv_log(f"[ERROR] Failed to export results: {str(e)}")
             traceback.print_exc()
     
     def _generate_comprehensive_report(self):
@@ -1643,7 +1566,7 @@ class PDFCrawlerEnhancedApp:
                 vendor_df = pd.DataFrame.from_dict(report_data['vendor_analysis'], orient='index')
                 vendor_df.to_excel(writer, sheet_name='Vendor Analysis')
         
-        self.log_crossref(f"📊 Detailed Excel report: {output_file}")
+        self.log_crossref(f"[CHART] Detailed Excel report: {output_file}")
     
     def _export_report_json(self, report_data, timestamp):
         """Export JSON summary report"""
@@ -1653,7 +1576,7 @@ class PDFCrawlerEnhancedApp:
         with open(output_file, 'w', encoding='utf-8') as f:
             json.dump(report_data, f, indent=2, ensure_ascii=False)
         
-        self.log_crossref(f"📄 JSON summary report: {output_file}")
+        self.log_crossref(f"[FILE] JSON summary report: {output_file}")
     
     def _export_report_html(self, report_data, timestamp):
         """Export interactive HTML report"""
@@ -1687,7 +1610,7 @@ class PDFCrawlerEnhancedApp:
             </div>
             
             <h2>Recommendations</h2>
-            {''.join(f'<div class="recommendation">• {rec}</div>' for rec in report_data['recommendations'])}
+            {''.join(f'<div class="recommendation">- {rec}</div>' for rec in report_data['recommendations'])}
             
             <h2>Performance Metrics</h2>
             <div class="summary">
@@ -2006,7 +1929,7 @@ class PDFCrawlerEnhancedApp:
             return log_path
             
         except Exception as e:
-            vv_log(f"❌ Failed to create backup log: {e}")
+            vv_log(f"[ERROR] Failed to create backup log: {e}")
             return None
     
     def get_current_log_content(self, log_area):
@@ -2014,7 +1937,7 @@ class PDFCrawlerEnhancedApp:
         try:
             return log_area.get(1.0, END)
         except Exception as e:
-            vv_log(f"❌ Failed to get log content: {e}")
+            vv_log(f"[ERROR] Failed to get log content: {e}")
             return ""
 
     def populate_crossref_results(self):
@@ -2054,7 +1977,7 @@ class PDFCrawlerEnhancedApp:
             vv_log(f"✅ Populated {len(self.crossref_results)} items in cross-reference results")
             
         except Exception as e:
-            vv_log(f"❌ Error populating cross-reference results: {e}")
+            vv_log(f"[ERROR] Error populating cross-reference results: {e}")
             self.log_crossref(f"Error populating results: {e}", "error")
 
     def on_run_clicked(self):
@@ -2132,16 +2055,16 @@ class PDFCrawlerEnhancedApp:
             return df_input, df_master
             
         except FileNotFoundError as e:
-            self.log(f"❌ Excel file not found: {e}", "error")
+            self.log(f"[ERROR] Excel file not found: {e}", "error")
             return None, None
         except PermissionError as e:
-            self.log(f"❌ Permission denied accessing Excel file: {e}", "error")
+            self.log(f"[ERROR] Permission denied accessing Excel file: {e}", "error")
             return None, None
         except pd.errors.EmptyDataError:
-            self.log("❌ Excel file is empty", "error")
+            self.log("[ERROR] Excel file is empty", "error")
             return None, None
         except Exception as e:
-            self.log(f"❌ Error reading Excel files: {e}", "error")
+            self.log(f"[ERROR] Error reading Excel files: {e}", "error")
             return None, None
 
     def process_all(self, args):
@@ -2192,7 +2115,7 @@ class PDFCrawlerEnhancedApp:
             
             # Show suppliers not in master list and store them for export
             if len(suppliers_not_in_master) > 0:
-                self.log("⚠️ SUPPLIERS NOT IN MASTER LIST:", "warning")
+                self.log("[WARNING]️ SUPPLIERS NOT IN MASTER LIST:", "warning")
                 not_in_master_list = suppliers_not_in_master['Supplier Name'].unique()
                 
                 # Store missing suppliers for later export
@@ -2213,7 +2136,7 @@ class PDFCrawlerEnhancedApp:
                 if len(not_in_master_list) > 20:
                     self.log(f"  ... and {len(not_in_master_list) - 20} more", "warning")
                 self.log("These suppliers will be SKIPPED (no website info available)", "warning")
-                self.log(f"📋 Missing suppliers list created with {len(self.missing_suppliers)} entries", "info")
+                self.log(f"[LIST] Missing suppliers list created with {len(self.missing_suppliers)} entries", "info")
                 # Enable export button
                 self.export_missing_button.config(state='normal')
             else:
@@ -2237,7 +2160,7 @@ class PDFCrawlerEnhancedApp:
                         'Status': 'In Master List but No Website'
                     })
                 
-                self.log(f"📋 Added {len(suppliers_no_website)} suppliers without websites to missing list", "info")
+                self.log(f"[LIST] Added {len(suppliers_no_website)} suppliers without websites to missing list", "info")
                 # Enable export button if not already enabled
                 if hasattr(self, 'missing_suppliers') and self.missing_suppliers:
                     self.export_missing_button.config(state='normal')
@@ -2256,65 +2179,61 @@ class PDFCrawlerEnhancedApp:
                 self.log("No suppliers with valid websites found.", "warning")
                 return
             
-            # Set up progress bar
+            # Build per-supplier keywords from the input file's item
+            # descriptions (same filter the pipeline uses).
+            supplier_keywords = {}
+            desc_col = next((c for c in instrument_data.columns
+                             if 'description' in c.lower()), None)
+            if _extract_keyword_tokens is not None and desc_col:
+                kw_sets = {}
+                for _, row in instrument_data.iterrows():
+                    name = str(row[supplier_col]).strip().lower()
+                    desc = str(row.get(desc_col, '')).strip()
+                    if name and desc and desc.lower() != 'nan':
+                        kw_sets.setdefault(name, set()).update(_extract_keyword_tokens(desc))
+                kw_sets = prune_generic_keywords(kw_sets)
+                supplier_keywords = {k: list(v) for k, v in kw_sets.items()}
+                self.log(f"Loaded keyword sets for {len(supplier_keywords)} suppliers", "info")
+            else:
+                self.log("[WARNING]️ No item-description column found - keyword filtering disabled", "warning")
+
+            # ScraperEngine reads its supplier list from an Excel file
+            supplier_file = os.path.join(pdf_folder, f"_gui_suppliers_{int(time.time())}.xlsx")
+            pd.DataFrame(pairs, columns=['Supplier Name', 'Website']) \
+                .drop_duplicates().to_excel(supplier_file, index=False)
+
+            self.engine = ScraperEngine(
+                page_timeout=config.page_timeout,
+                max_pdf_size_mb=config.max_pdf_size_mb,
+                min_pdf_size_bytes=config.min_pdf_size_bytes,
+                strict_content_validation=config.strict_content_validation,
+                verbose=self.verbose_var.get() == 1,
+                skip_recent_sites=False,
+                allowlist_only=True,
+                use_keyword_filter=False,
+                supplier_keywords=supplier_keywords,
+            )
+
+            self.log(f"Crawling {len(pairs)} suppliers via ScraperEngine...", "info")
             self.progress['maximum'] = len(pairs)
             self.progress['value'] = 0
-            
-            # Process suppliers in batches to avoid overwhelming the system
-            batch_size = 10  # Process 10 suppliers at a time
-            max_concurrent = self.max_concurrent_var.get()
-            
-            self.log(f"Processing {len(pairs)} suppliers in batches of {batch_size} with {max_concurrent} concurrent threads", "info")
-            
-            completed_count = 0
-            _count_lock = threading.Lock()   # protects completed_count across threads
 
-            for batch_start in range(0, len(pairs), batch_size):
-                if not self.running:
-                    break
+            # Forward engine log lines into the GUI log area
+            handler = _TkLogHandler(self)
+            engine_logger = logging.getLogger('scraper_engine')
+            engine_logger.addHandler(handler)
+            try:
+                summary = self.engine.run(supplier_file, pdf_folder)
+            finally:
+                engine_logger.removeHandler(handler)
+                try:
+                    os.remove(supplier_file)
+                except Exception:
+                    pass
 
-                batch_end = min(batch_start + batch_size, len(pairs))
-                current_batch = pairs[batch_start:batch_end]
-
-                self.log(f"Processing batch {batch_start//batch_size + 1}/{(len(pairs) + batch_size - 1)//batch_size}: suppliers {batch_start + 1}-{batch_end}", "info")
-
-                # Process current batch with semaphore for concurrency control
-                semaphore = threading.Semaphore(max_concurrent)
-                batch_threads = []
-
-                def crawl_vendor(supplier, url):
-                    try:
-                        semaphore.acquire()
-                        self.crawl_site(supplier, url)
-                    except Exception as e:
-                        self.log(f"❌ Unexpected error crawling {supplier}: {e}", "error")
-                    finally:
-                        semaphore.release()
-                        nonlocal completed_count
-                        with _count_lock:
-                            completed_count += 1
-                            current = completed_count
-                        self.progress['value'] = current
-                        self.log(f"Completed {current}/{len(pairs)} suppliers", "info")
-
-                # Start threads for current batch
-                for supplier, url in current_batch:
-                    if not self.running:
-                        break
-                    thread = threading.Thread(target=crawl_vendor, args=(supplier, url), daemon=True)
-                    thread.start()
-                    batch_threads.append(thread)
-
-                # Wait for current batch to complete with timeout
-                batch_timeout = 300  # 5 minutes per batch
-                for thread in batch_threads:
-                    thread.join(timeout=batch_timeout)
-                    if thread.is_alive():
-                        self.log(f"⚠️ Thread timeout - some suppliers in batch may still be processing", "warning")
-
-                if self.running:
-                    self.log(f"Batch {batch_start//batch_size + 1} completed", "info")
-                    gc.collect()   # reclaim memory between batches
+            self.page_count = summary.get('pages', 0)
+            self.pdf_count = summary.get('pdfs', 0)
+            self.progress['value'] = self.progress['maximum']
             
             if self.running:
                 self.log(f"✅ Crawling completed! Visited {self.page_count} pages, downloaded {self.pdf_count} PDFs.", "success")
@@ -2324,7 +2243,7 @@ class PDFCrawlerEnhancedApp:
                     log_content = self.get_current_log_content(self.log_area)
                     self.create_backup_log(self.download_folder, log_content, "crawling")
             else:
-                self.log("⏹️ Crawling stopped by user.", "warning")
+                self.log("[STOP]️ Crawling stopped by user.", "warning")
                 
                 # Create backup log even if stopped
                 if self.download_folder:
@@ -2332,7 +2251,7 @@ class PDFCrawlerEnhancedApp:
                     self.create_backup_log(self.download_folder, log_content, "crawling_stopped")
                 
         except Exception as e:
-            self.log(f"❌ Error during processing: {e}", "error")
+            self.log(f"[ERROR] Error during processing: {e}", "error")
             if self.verbose_var.get():
                 self.log(traceback.format_exc(), "error")
                 
@@ -2345,306 +2264,6 @@ class PDFCrawlerEnhancedApp:
             self.timer_running = False
             self.run_button.config(state='normal')
             self.stop_button.config(state='disabled')
-
-    def crawl_site(self, supplier, url):
-        """Crawl a single vendor site with intelligent crawling strategy."""
-        if not self.running:
-            return
-        
-        self.log(f"🌐 Starting intelligent crawl for {supplier}: {url}", "info")
-        
-        try:
-            # Create vendor folder
-            vendor_folder = os.path.join(self.download_folder, supplier)
-            os.makedirs(vendor_folder, exist_ok=True)
-            
-            # Create a separate visited set for this supplier to avoid race conditions
-            supplier_visited = set()
-            
-            # Try intelligent crawling first
-            success = self._intelligent_crawling(url, supplier, vendor_folder, supplier_visited)
-            
-            if not success:
-                # Fall back to traditional crawling
-                self.log(f"🔍 Using traditional crawling for {supplier}", "info")
-                self.crawl_url_recursive(url, vendor_folder, supplier, visited_set=supplier_visited)
-            
-            # Log completion
-            self.log(f"✅ Finished crawling {supplier} (visited {len(supplier_visited)} pages)", "info")
-            
-        except Exception as e:
-            self.log(f"❌ Failed to crawl {supplier}: {e}", "error")
-    
-    def _intelligent_crawling(self, url, supplier, vendor_folder, supplier_visited):
-        """Use sitemap and robots.txt for efficient crawling"""
-        try:
-            # Check robots.txt first
-            robots_url = urljoin(url, '/robots.txt')
-            self.log(f"🤖 Checking robots.txt for {supplier}", "info")
-            
-            try:
-                robots_response = self.session.get(robots_url, timeout=10)
-                if robots_response.status_code == 200:
-                    robots_content = robots_response.text
-                    
-                    # Parse sitemap if available
-                    sitemap_urls = self._extract_sitemap_urls(robots_content, url)
-                    
-                    if sitemap_urls:
-                        self.log(f"🎯 Found {len(sitemap_urls)} sitemaps for {supplier}", "info")
-                        return self._crawl_via_sitemap(sitemap_urls, supplier, vendor_folder, supplier_visited)
-                    else:
-                        self.log(f"📄 No sitemaps found in robots.txt for {supplier}", "info")
-                        
-            except Exception as e:
-                self.log(f"⚠️ Could not access robots.txt for {supplier}: {e}", "warning")
-            
-            return False  # Fall back to traditional crawling
-            
-        except Exception as e:
-            self.log(f"⚠️ Intelligent crawling failed for {supplier}: {e}", "warning")
-            return False
-    
-    def _extract_sitemap_urls(self, robots_content, base_url):
-        """Extract sitemap URLs from robots.txt"""
-        sitemap_urls = []
-        for line in robots_content.split('\n'):
-            line = line.strip()
-            if line.lower().startswith('sitemap:'):
-                sitemap_url = line.split(':', 1)[1].strip()
-                sitemap_urls.append(urljoin(base_url, sitemap_url))
-        return sitemap_urls
-    
-    def _crawl_via_sitemap(self, sitemap_urls, supplier, vendor_folder, supplier_visited):
-        """Crawl using sitemap URLs"""
-        try:
-            pdf_urls = []
-            
-            for sitemap_url in sitemap_urls:
-                if not self.running:
-                    break
-                    
-                try:
-                    self.log(f"📋 Processing sitemap: {sitemap_url}", "info")
-                    response = self.session.get(sitemap_url, timeout=15)
-                    response.raise_for_status()
-                    
-                    # Parse sitemap XML
-                    from bs4 import BeautifulSoup
-                    soup = BeautifulSoup(response.content, 'xml')
-                    
-                    # Find all URLs in sitemap
-                    urls = []
-                    for loc in soup.find_all('loc'):
-                        if loc.text:
-                            urls.append(loc.text.strip())
-                    
-                    # Filter for PDF URLs
-                    for url in urls:
-                        if url.lower().endswith('.pdf'):
-                            pdf_urls.append(url)
-                        elif len(supplier_visited) < MAX_PAGES_PER_SITE:
-                            supplier_visited.add(url)
-                    
-                    self.log(f"📋 Found {len(urls)} URLs in sitemap, {len([u for u in urls if u.lower().endswith('.pdf')])} PDFs", "info")
-                    
-                except Exception as e:
-                    self.log(f"⚠️ Failed to process sitemap {sitemap_url}: {e}", "warning")
-                    continue
-            
-            # Download found PDFs
-            for pdf_url in pdf_urls:
-                if not self.running:
-                    break
-                self.download_pdf(pdf_url, vendor_folder, supplier)
-            
-            if pdf_urls:
-                self.log(f"✅ Sitemap crawling found {len(pdf_urls)} PDFs for {supplier}", "info")
-                return True
-            else:
-                self.log(f"📄 No PDFs found via sitemap for {supplier}", "info")
-                return False
-                
-        except Exception as e:
-            self.log(f"❌ Sitemap crawling failed for {supplier}: {e}", "error")
-            return False
-
-    def crawl_url_recursive(self, url, vendor_folder, supplier, visited_set=None, depth=0, max_depth=2):
-        """Recursively crawl URLs to find PDFs with security validation."""
-        if visited_set is None:
-            visited_set = set()
-            
-        if not self.running or depth > max_depth or url in visited_set:
-            return
-        
-        # Security validation
-        if not validate_url(url):
-            self.log(f"⚠️ Invalid or unsafe URL blocked: {url}", "warning")
-            return
-        
-        if len(visited_set) >= MAX_PAGES_PER_SITE:
-            self.log(f"⚠️ Reached page limit for {supplier}, stopping", "warning")
-            return
-        
-        visited_set.add(url)
-        self.page_count += 1
-        
-        try:
-            # Add delay between requests
-            time.sleep(REQUEST_DELAY)
-            
-            if self.verbose_var.get():
-                self.log(f"📄 Visiting: {url} (depth {depth})", "info")
-            
-            # Fetch the page with timeout
-            response = self.session.get(url, timeout=PAGE_TIMEOUT)
-            response.raise_for_status()
-            
-            # Check if it's a PDF
-            if url.lower().endswith('.pdf'):
-                self.download_pdf(url, vendor_folder, supplier)
-                return
-            
-            # Parse HTML
-            soup = BeautifulSoup(response.content, 'html.parser')
-            
-            # Find all links
-            pdf_links = []
-            other_links = []
-            
-            for link in soup.find_all('a', href=True):
-                if not self.running:
-                    return
-                
-                href = link['href']
-                full_url = urljoin(url, href)
-                
-                # Only follow links on the same domain
-                if urlparse(full_url).netloc == urlparse(url).netloc:
-                    if full_url.lower().endswith('.pdf'):
-                        pdf_links.append(full_url)
-                    elif depth < max_depth and full_url not in self.visited:
-                        other_links.append(full_url)
-            
-            # Download PDFs first
-            for pdf_url in pdf_links:
-                if not self.running:
-                    return
-                self.download_pdf(pdf_url, vendor_folder, supplier)
-            
-            # Then follow other links (limit to prevent infinite crawling)
-            for link_url in other_links[:10]:  # Limit to 10 links per page
-                if not self.running:
-                    return
-                if link_url not in visited_set:
-                    self.crawl_url_recursive(link_url, vendor_folder, supplier, visited_set, depth + 1, max_depth)
-            
-        except requests.exceptions.Timeout:
-            self.log(f"⏰ Timeout crawling {url}", "warning")
-        except requests.exceptions.RequestException as e:
-            self.log(f"⚠️ Request failed for {url}: {e}", "warning")
-        except Exception as e:
-            self.log(f"❌ Failed to crawl {url}: {e}", "error")
-
-    def download_pdf(self, pdf_url, vendor_folder, supplier):
-        """Download a PDF file with security validation and integrity checking."""
-        if not self.running:
-            return
-        
-        try:
-            # Security validation
-            if not validate_url(pdf_url):
-                self.log(f"⚠️ Invalid or unsafe PDF URL blocked: {pdf_url}", "warning")
-                return
-            
-            # Get filename from URL
-            filename = os.path.basename(urlparse(pdf_url).path)
-            if not filename.lower().endswith('.pdf'):
-                filename += '.pdf'
-            
-            # Enhanced filename sanitization
-            filename = sanitize_path(filename)
-            if not filename or len(filename) < 4:  # Minimum valid filename
-                filename = f"document_{int(time.time())}.pdf"
-            
-            # Check if already downloaded
-            file_path = os.path.join(vendor_folder, filename)
-            if os.path.exists(file_path):
-                if self.verbose_var.get():
-                    self.log(f"📄 PDF already exists: {filename}", "info")
-                return
-            
-            # Download the PDF with size limit (50MB max)
-            response = self.session.get(pdf_url, timeout=PAGE_TIMEOUT, stream=True)
-            response.raise_for_status()
-            
-            # Check content type and size
-            content_type = response.headers.get('content-type', '').lower()
-            content_length = response.headers.get('content-length')
-            
-            max_size_bytes = config.max_pdf_size_mb * 1024 * 1024
-            if content_length and int(content_length) > max_size_bytes:
-                self.log(f"⚠️ PDF too large, skipping: {pdf_url} ({int(content_length)/(1024*1024):.1f}MB > {config.max_pdf_size_mb}MB)", "warning")
-                return
-            
-            if config.strict_content_validation and 'pdf' not in content_type and not pdf_url.lower().endswith('.pdf'):
-                self.log(f"⚠️ Skipping non-PDF file: {pdf_url}", "warning")
-                return
-            
-            # Download with size checking
-            downloaded_size = 0
-            max_size = max_size_bytes
-            
-            with open(file_path, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    if not self.running:
-                        os.remove(file_path)  # Clean up partial download
-                        return
-                    
-                    downloaded_size += len(chunk)
-                    if downloaded_size > max_size:
-                        os.remove(file_path)  # Clean up oversized file
-                        self.log(f"⚠️ PDF too large during download, removed: {pdf_url}", "warning")
-                        return
-                    
-                    f.write(chunk)
-            
-            # Verify the downloaded file
-            if os.path.getsize(file_path) < config.min_pdf_size_bytes:
-                os.remove(file_path)
-                self.log(f"⚠️ Downloaded file too small, removed: {filename} ({os.path.getsize(file_path)} bytes < {config.min_pdf_size_bytes} bytes)", "warning")
-                return
-            
-            # Calculate file hash for integrity
-            file_hash = calculate_file_hash(file_path)
-            if file_hash:
-                vv_log(f"File hash: {file_hash[:16]}...")
-            
-            self.pdf_count += 1
-            self.log(f"✅ Downloaded: {supplier}/{filename} ({os.path.getsize(file_path)/(1024*1024):.1f}MB)", "success")
-            
-        except requests.exceptions.Timeout:
-            self.log(f"⏰ Timeout downloading {pdf_url}", "warning")
-        except requests.exceptions.RequestException as e:
-            self.log(f"⚠️ Failed to download {pdf_url}: {e}", "warning")
-        except Exception as e:
-            self.log(f"❌ Failed to download {pdf_url}: {e}", "error")
-            # Clean up any partial file
-            try:
-                if 'file_path' in locals() and os.path.exists(file_path):
-                    os.remove(file_path)
-            except Exception:
-                pass
-
-    def sanitize_filename(self, filename):
-        """Sanitize filename for safe saving."""
-        # Remove or replace invalid characters
-        filename = re.sub(r'[<>:"/\\|?*]', '_', filename)
-        # Limit length
-        if len(filename) > 200:
-            name, ext = os.path.splitext(filename)
-            filename = name[:200-len(ext)] + ext
-        return filename
 
     def export_missing_suppliers(self):
         """Export missing suppliers list to Excel."""
@@ -2664,7 +2283,7 @@ class PDFCrawlerEnhancedApp:
             df.to_excel(filename, index=False, engine='openpyxl')
             
             self.log(f"✅ Missing suppliers exported to: {filename}", "success")
-            self.log(f"📊 Exported {len(self.missing_suppliers)} missing suppliers", "info")
+            self.log(f"[CHART] Exported {len(self.missing_suppliers)} missing suppliers", "info")
             
             # Show summary
             missing_count = len([s for s in self.missing_suppliers if s['Status'] == 'Missing from Master List'])
@@ -2674,13 +2293,15 @@ class PDFCrawlerEnhancedApp:
             self.log(f"   - {no_website_count} suppliers in master list but no website", "info")
             
         except Exception as e:
-            self.log(f"❌ Failed to export missing suppliers: {e}", "error")
+            self.log(f"[ERROR] Failed to export missing suppliers: {e}", "error")
 
     def on_stop_clicked(self):
         """Handle stop button click."""
         self.running = False
         self.timer_running = False
-        self.log("⏹️ Stopping crawler...", "warning")
+        if self.engine is not None:
+            self.engine.stop()
+        self.log("[STOP]️ Stopping crawler...", "warning")
 
     def on_closing(self):
         """Clean up when the application is closed."""
@@ -2695,7 +2316,7 @@ class PDFCrawlerEnhancedApp:
             config.save_to_file()
             vv_log("✅ Configuration saved")
         except Exception as e:
-            vv_log(f"⚠️ Failed to save configuration: {e}")
+            vv_log(f"[WARNING]️ Failed to save configuration: {e}")
         
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -2715,8 +2336,8 @@ def main():
         # Check for single instance
         vv_log("Checking for single instance...")
         if not check_single_instance():
-            vv_log("❌ Another instance is already running")
-            print("❌ Another instance of PDF Crawler is already running!")
+            vv_log("[ERROR] Another instance is already running")
+            print("[ERROR] Another instance of PDF Crawler is already running!")
             return
         
         vv_log("✅ Single instance check passed")
@@ -2737,9 +2358,9 @@ def main():
         vv_log("✅ Application closed successfully")
         
     except Exception as e:
-        vv_log(f"❌ Application startup failed: {e}")
+        vv_log(f"[ERROR] Application startup failed: {e}")
         traceback.print_exc()
-        print(f"❌ Application startup failed: {e}")
+        print(f"[ERROR] Application startup failed: {e}")
 
 if __name__ == "__main__":
     main()

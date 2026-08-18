@@ -40,7 +40,7 @@ def _extract_suppliers(classified_excel: str) -> list:
             f"No supplier column found in {classified_excel}. "
             f"Columns: {list(df.columns)}"
         )
-    return list(df[col].dropna().str.strip().str.upper().unique())
+    return list(df[col].dropna().astype(str).str.strip().str.upper().unique())
 
 
 def _append_to_pending(path: str, rows: list) -> None:

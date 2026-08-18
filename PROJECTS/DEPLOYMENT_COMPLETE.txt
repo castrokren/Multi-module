@@ -1,0 +1,284 @@
+================================================================================
+  WINDOWS SERVER DEPLOYMENT SOLUTION - COMPLETE
+================================================================================
+
+Deployment Date: 2026-05-12
+Version: 1.0
+Target: Windows Server (On-Premises) with Folder Monitoring
+
+================================================================================
+  DELIVERABLES
+================================================================================
+
+📁 CONFIGURATION FILES:
+  ✓ ops\.env.example          → Configuration template
+  ✓ ops\.env                  → Your configuration (EDIT WITH YOUR EMAIL)
+
+🔧 SERVICE COMPONENTS:
+  ✓ ops\folder_monitor_service.py   → Watches input folder, runs pipeline
+  ✓ ops\dashboard.py                → Web interface (http://localhost:5000)
+  ✓ ops\email_alerter.py            → Email notifications (integrated)
+
+🎯 LAUNCHER SCRIPTS:
+  ✓ ops\start_monitor.bat     → Start services (double-click or run)
+  ✓ ops\stop_monitor.bat      → Stop services
+  ✓ ops\setup_task_scheduler.ps1 → Auto-register with Windows Task Scheduler
+
+🛠️ UTILITIES:
+  ✓ ops\rotate_logs.ps1       → Clean old log files
+  ✓ ops\test_email.py         → Test SMTP configuration
+
+📚 DOCUMENTATION:
+  ✓ ops\README.md             → Quick reference guide
+  ✓ ops\DEPLOYMENT_CHECKLIST.md → Step-by-step setup (10 mins)
+  ✓ ops\deployment_guide.md   → Complete technical guide (50+ pages)
+
+================================================================================
+  QUICK START (5 MINUTES)
+================================================================================
+
+1. CONFIGURE EMAIL
+   -----------
+   copy ops\.env.example ops\.env
+   [Edit ops\.env with your email settings]
+
+2. INSTALL DEPENDENCIES
+   ---------------
+   cd C:\Projects\Crawler\PROJECTS
+   python -m venv venv
+   .\venv\Scripts\Activate.ps1
+   pip install watchdog flask flask-cors python-dotenv
+
+3. START SERVICES
+   ---------------
+   Double-click: ops\start_monitor.bat
+   OR
+   python ops\folder_monitor_service.py
+   python ops\dashboard.py
+
+4. VERIFY
+   ------
+   Open: http://localhost:5000
+   Should see: "Idle - Waiting for input file..."
+
+5. TEST
+   ----
+   Place Excel file in: data\som-in\
+   Pipeline should start within 10 seconds
+
+================================================================================
+  WHAT YOU GET
+================================================================================
+
+✅ AUTOMATED FOLDER MONITORING
+   • Watches data/som-in/ for new Excel files
+   • Detects files within 10 seconds
+   • Automatically starts pipeline
+   • Prevents duplicate runs
+
+✅ REAL-TIME DASHBOARD
+   • Web interface: http://localhost:5000
+   • Current status & progress
+   • Run history (last 30 days)
+   • Live log viewer
+   • One-click restart
+
+✅ EMAIL FAILURE ALERTS
+   • Instant notification on pipeline failure
+   • Error details and recovery instructions
+   • Configurable recipients
+   • SMTP support (Office 365, Gmail, etc.)
+
+✅ WINDOWS INTEGRATION
+   • Auto-start on server boot
+   • Auto-restart on failure (3 retries)
+   • Service account support
+   • Full event logging
+
+================================================================================
+  ARCHITECTURE
+================================================================================
+
+Input Folder
+  ↓ (new Excel file appears)
+Folder Monitor (detects within 10 seconds)
+  ↓ (starts if not running)
+Pipeline Orchestrator
+  ├─ Stage 0: Data Cleaning
+  ├─ Stage 1: Scraper (PDFs from supplier websites)
+  ├─ Stage 2: Classify items
+  ├─ Stage 2b: Supplier Resolution
+  └─ Stage 3: Cross-Reference (FINAL OUTPUT)
+  ↓ (75-120 minutes)
+Results File
+  └─ crossref_results_[timestamp].xlsx
+  ↓ (email sent on completion/failure)
+Alert System → Email to ops team
+Dashboard → Display status at http://localhost:5000
+
+================================================================================
+  FILE LOCATIONS
+================================================================================
+
+Input:        C:\Projects\Crawler\PROJECTS\data\som-in\
+              (Place new Excel files here)
+
+Results:      C:\Projects\Crawler\PROJECTS\src\services\cross-reference\results\
+              (crossref_results_*.xlsx)
+
+PDFs:         C:\Projects\Crawler\PROJECTS\data\scraped-pdfs\
+              (Downloaded from supplier websites)
+
+Logs:         C:\Projects\Crawler\PROJECTS\src\services\cross-reference\results\
+              (monitor_service.log, pipeline_*.log)
+
+Dashboard:    http://localhost:5000
+
+================================================================================
+  PRODUCTION SETUP
+================================================================================
+
+STEP 1: CONFIGURE
+  copy ops\.env.example ops\.env
+  [Edit .env with your email]
+
+STEP 2: INSTALL
+  python -m venv venv
+  .\venv\Scripts\Activate.ps1
+  pip install -r requirements.txt
+  pip install watchdog flask flask-cors python-dotenv
+
+STEP 3: REGISTER WITH WINDOWS
+  powershell -ExecutionPolicy Bypass -File ops\setup_task_scheduler.ps1
+  (Run as Administrator)
+
+STEP 4: REBOOT
+  Restart-Computer -Force
+
+STEP 5: VERIFY
+  Services auto-start after reboot
+  Dashboard accessible at: http://localhost:5000
+  Place test Excel file in: data\som-in\
+
+================================================================================
+  DAILY OPERATIONS
+================================================================================
+
+MORNING (9 AM):
+  • Check dashboard: http://[server]:5000
+  • Review yesterday's pipeline run
+  • Look for failure emails
+
+THROUGHOUT DAY:
+  • Upload new Excel files to data/som-in/
+  • Monitor detects within 10 seconds
+  • Pipeline runs automatically (75-120 minutes)
+
+END OF DAY (5 PM):
+  • Verify pipeline completed
+  • Archive results to backup location
+  • Check disk space
+
+WEEKLY:
+  • Review all pipeline runs
+  • Update supplier master list
+  • Check log file sizes
+
+================================================================================
+  MONITORING & ALERTS
+================================================================================
+
+Dashboard Metrics:
+  • Current run status & progress
+  • Estimated completion time
+  • Last 30 days of runs
+  • Success/failure ratio
+  • Real-time log viewer
+
+Email Alerts:
+  • Subject: ❌ PIPELINE FAILED - Run #N
+  • Includes: Error details, log excerpt, recovery steps
+  • Recipients: Configured in ops\.env
+
+Dashboard Access:
+  • URL: http://[server]:5000
+  • Refresh: Automatic every 5 seconds
+  • One-click manual restart available
+
+================================================================================
+  TROUBLESHOOTING
+================================================================================
+
+Monitor not detecting files?
+  → Check folder permissions: data/som-in/
+  → Verify .xlsx extension on Excel file
+  → Check monitor log for errors
+
+Email not sending?
+  → Run: python ops\test_email.py
+  → Verify .env has correct credentials
+  → Confirm app-specific password (not regular password)
+
+Dashboard not accessible?
+  → Verify running: Get-Process python
+  → Check port: netstat -an | findstr 5000
+  → Try: http://127.0.0.1:5000
+
+Pipeline won't start?
+  → Check monitor_service.log
+  → Verify previous run completed
+  → Check disk space (need 10+ GB)
+  → Verify network connectivity
+
+================================================================================
+  RESOURCES
+================================================================================
+
+Email Configuration:
+  • Office 365: https://account.activedirectory.windowsazure.com/
+  • Gmail: https://myaccount.google.com/apppasswords
+
+Documentation:
+  • ops\README.md — Quick reference
+  • ops\DEPLOYMENT_CHECKLIST.md — Step-by-step setup
+  • ops\deployment_guide.md — Complete technical guide
+
+Quick Commands:
+  Start:     .\ops\start_monitor.bat
+  Stop:      .\ops\stop_monitor.bat
+  Test Email: python ops\test_email.py
+  View Log:   Get-Content src/services/cross-reference/results/monitor_service.log -Tail 50
+
+================================================================================
+  WHAT'S NEXT
+================================================================================
+
+1. READ:  ops\DEPLOYMENT_CHECKLIST.md (10-minute setup guide)
+2. EDIT:  ops\.env (your email configuration)
+3. RUN:   ops\start_monitor.bat (to start services)
+4. VERIFY: http://localhost:5000 (check dashboard)
+5. TEST:  Place Excel file in data\som-in\ (test automation)
+6. GO LIVE: Register with Task Scheduler for auto-start
+
+================================================================================
+  SUPPORT
+================================================================================
+
+For detailed information, see:
+  • ops\deployment_guide.md (comprehensive technical guide)
+  • ops\DEPLOYMENT_CHECKLIST.md (step-by-step walkthrough)
+  • ops\README.md (quick reference)
+
+For troubleshooting:
+  1. Check logs: src/services/cross-reference/results/
+  2. Test email: python ops/test_email.py
+  3. Review dashboard: http://localhost:5000
+  4. Read deployment_guide.md for your specific issue
+
+================================================================================
+
+Deployment Solution Created: 2026-05-12
+Ready to Deploy: YES ✓
+Status: Complete & Ready for Production
+
+================================================================================

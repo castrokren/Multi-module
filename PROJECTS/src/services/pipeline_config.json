@@ -1,0 +1,63 @@
+{
+  "_comment": "Unified pipeline configuration. Paths can be relative to the PROJECTS root.",
+
+  "paths": {
+    "supplier_excel":  "data/masterlist/updated_master_list.xlsx",
+    "pdf_dir":         "C:/Data/Crawler/output",
+    "input_excel_dir": "C:/Data/Crawler/input",
+    "labeled_dir":     "C:/Data/Crawler/labeled",
+    "master_excel":    "data/masterlist/updated_master_list.xlsx",
+    "master_list":     "data/masterlist/updated_master_list.xlsx",
+    "results_dir":     "src/services/cross-reference/results",
+    "review_dir":      "C:/Data/Crawler/review"
+  },
+
+  "pipeline": {
+    "run_data_cleaner":         true,
+    "run_scraper":              true,
+    "run_classify":             true,
+    "run_supplier_resolution":  false,
+    "run_crossref":             true,
+    "stop_on_failure": false
+  },
+
+  "supplier_resolution": {
+    "enabled":                  false,
+    "confidence_threshold":     70,
+    "search_delay_seconds":     1.5,
+    "search_timeout_seconds":   10,
+    "pending_list_path":        "data/supplier-pending/new_suppliers_pending.xlsx",
+    "resolved_list_path":       "data/supplier-pending/resolved_suppliers.xlsx"
+  },
+
+  "scraper": {
+    "max_concurrent":           3,
+    "request_delay":            2.0,
+    "page_timeout":             15,
+    "max_pages_per_site":       50,
+    "max_pdf_size_mb":          100,
+    "min_pdf_size_bytes":       512,
+    "strict_content_validation": false,
+    "verbose":                  false,
+    "batch_size":               10,
+    "skip_recent_sites":        true,
+    "days_before_rescrape":     7,
+    "allowlist_only":           true
+  },
+
+  "classify": {
+    "learning_mode":         true,
+    "min_occurrences":       5,
+    "confidence_threshold":  0.7,
+    "hw_keywords_file":      "src/services/classify/research_instrument_keywords.txt",
+    "sw_keywords_file":      "src/services/classify/software_keywords.txt",
+    "ni_keywords_file":      "src/services/classify/non_instrument_keywords.txt"
+  },
+
+  "crossref": {
+    "threshold":      60,
+    "test_mode":      false,
+    "low_cpu_mode":   true,
+    "clean_output":   true
+  }
+}

@@ -82,7 +82,7 @@ def process_pdfs_parallel_with_timeout(self, *args, **kwargs):
     try:
         return self.process_pdfs_with_recovery(*args, **kwargs)
     except TimeoutException:
-        print("        ⏰ OVERALL TIMEOUT: Process took too long, terminating")
+        print("        [TIMEOUT] OVERALL TIMEOUT: Process took too long, terminating")
         return []
     finally:
         if not IS_WINDOWS:
@@ -91,7 +91,7 @@ def process_pdfs_parallel_with_timeout(self, *args, **kwargs):
 # Emergency stop mechanism
 def emergency_stop():
     """Emergency stop function that can be called to terminate all processes."""
-    print("🚨 EMERGENCY STOP TRIGGERED")
+    print("[ALERT] EMERGENCY STOP TRIGGERED")
     GlobalStopManager.set_stop_flag(True)
     import os
     import sys
@@ -103,31 +103,27 @@ PSUTIL_AVAILABLE = False
 try:
     import psutil  # type: ignore
     PSUTIL_AVAILABLE = True
-    print("✅ psutil imported successfully - enhanced system monitoring available")
+    print("[OK] psutil imported successfully - enhanced system monitoring available")
 except (ImportError, ModuleNotFoundError):
     PSUTIL_AVAILABLE = False
-    print("⚠️ psutil not available - using fallback memory detection")
-    print("💡 To install psutil: pip install psutil")
-    print("💡 psutil provides better system resource monitoring for performance optimization")
+    print("[WARN] psutil not available - using fallback memory detection")
+    print("[INFO] To install psutil: pip install psutil")
+    print("[INFO] psutil provides better system resource monitoring for performance optimization")
 except Exception as e:
     PSUTIL_AVAILABLE = False
-    print(f"⚠️ psutil import failed: {e} - using fallback memory detection")
-    print("💡 To install psutil: pip install psutil")
-    print("💡 psutil provides better system resource monitoring for performance optimization")
+    print(f"[WARN] psutil import failed: {e} - using fallback memory detection")
+    print("[INFO] To install psutil: pip install psutil")
+    print("[INFO] psutil provides better system resource monitoring for performance optimization")
 
 # VV LOGGING: Add very verbose logging
 def vv_log(message):
     """Minimal logging to avoid performance issues."""
-    if "❌" in message or "ERROR" in message:
+    if "[ERROR]" in message or "ERROR" in message:
         print(f"[{time.strftime('%H:%M:%S')}] {message}")
 
-class TimeoutError(Exception):
-    """Custom timeout exception."""
-    pass
-
-def timeout_handler(signum, frame):
-    """Signal handler for timeout."""
-    raise TimeoutError("PDF processing timed out")
+# ponytail: removed duplicate timeout_handler + custom TimeoutError class that
+# shadowed the builtin. Signal alarms raise TimeoutException (handler above);
+# future.result(timeout=) raises the builtin TimeoutError, now unshadowed.
 
 # Check if we're on Windows (where SIGALRM is not available)
 IS_WINDOWS = platform.system() == "Windows"
@@ -143,17 +139,20 @@ def process_single_pdf(args):
     try:
         # Extract text from PDF
         pdf_text = extract_pdf_text_standalone(pdf_path)
-        
+
         if GlobalStopManager.should_stop():
             return None
-        
+
         if not pdf_text:
             return None
-        
+
+        # Save extracted text to documents_text directory
+        save_extracted_text(pdf_path, pdf_text)
+
         # Check global stop flag again
         if GlobalStopManager.should_stop():
             return None
-        
+
         # Calculate match score with filename filtering
         score = calculate_match_score_standalone(search_keywords, pdf_text, description, threshold, pdf_path)
         
@@ -169,7 +168,24 @@ def process_single_pdf(args):
     except Exception as e:
         return None
 
-def extract_pdf_text_standalone(pdf_path, timeout_seconds=15):
+def save_extracted_text(pdf_path, extracted_text):
+    """Save extracted PDF text to documents_text directory."""
+    try:
+        output_dir = Path("C:/Data/Crawler/pdf_discovery/documents_text")
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Create filename from PDF filename
+        pdf_name = Path(pdf_path).stem
+        supplier_name = Path(pdf_path).parent.name
+        output_file = output_dir / f"{supplier_name}_{pdf_name}.txt"
+
+        # Save text
+        with open(output_file, 'w', encoding='utf-8') as f:
+            f.write(extracted_text)
+    except Exception as e:
+        pass  # Silent fail - don't disrupt PDF processing
+
+def extract_pdf_text_standalone(pdf_path, timeout_seconds=15, save_text=False):
     """Standalone PDF text extraction function for multiprocessing."""
     try:
         # Check if file exists and is readable
@@ -266,8 +282,8 @@ def calculate_match_score_standalone(keywords, pdf_text, description, threshold=
         if not keywords or not pdf_text:
             return 0.0
         
-        # Content quality filter - reject low-content PDFs
-        if len(pdf_text.strip()) < 800:
+        # Content quality filter - reject very low-content PDFs
+        if len(pdf_text.strip()) < 200:
             return 0.0
         
         pdf_text_lower = pdf_text.lower()
@@ -280,9 +296,9 @@ def calculate_match_score_standalone(keywords, pdf_text, description, threshold=
         
         # Negative signals (marketing/noise)
         negative_patterns = [
-            'price', 'price-sheet', 'executive', 'summary', 'sustainability', 
-            'checklist', 'faq', 'one-pager', 'updated', 'brochure', 'catalog',
-            'flyer', 'poster', 'presentation', 'overview', 'intro'
+            'price', 'price-sheet', 'executive', 'summary', 'sustainability',
+            'checklist', 'faq', 'one-pager', 'updated', 'catalog',
+            'flyer', 'poster', 'presentation', 'intro'
         ]
         
         # Positive signals (technical docs)
@@ -347,7 +363,7 @@ class PDFSmartFilter:
     """Smart PDF filtering system to prioritize useful PDFs and filter out noise."""
     
     def __init__(self):
-        # Pre-compile all patterns once — avoids re-compilation on every filename check
+        # Pre-compile all patterns once - avoids re-compilation on every filename check
         _compile = lambda pats: [re.compile(p, re.IGNORECASE) for p in pats]
 
         # High priority patterns (instruction manuals, guides, etc.)
@@ -365,10 +381,11 @@ class PDFSmartFilter:
             r'.*documentation.*',
         ])
 
-        # Medium priority patterns (specs only, not datasheets)
+        # Medium priority patterns (specs, datasheets, technical data)
         self.medium_priority_patterns = _compile([
             r'.*specification.*',
             r'.*spec.*sheet.*',
+            r'.*datasheet.*',
             r'.*technical.*data.*',
             r'.*product.*info.*',
         ])
@@ -383,7 +400,6 @@ class PDFSmartFilter:
             r'.*cad.*',
             r'.*schematic.*',
             r'.*reprint.*',
-            r'.*brochure.*',
             r'.*flyer.*',
             r'.*poster.*',
             r'.*advertisement.*',
@@ -396,7 +412,6 @@ class PDFSmartFilter:
             r'.*price.*list.*',
             r'.*order.*form.*',
             r'.*color.*code.*parts.*list.*',
-            r'.*datasheet.*',
             r'.*self.*assessment.*',
         ])
     
@@ -405,7 +420,7 @@ class PDFSmartFilter:
         Classify PDF by filename and return (category, priority_score)
         Priority: 100=high, 50=medium, 10=low, 0=noise
         """
-        # Patterns are pre-compiled with IGNORECASE — no need to lowercase filename
+        # Patterns are pre-compiled with IGNORECASE - no need to lowercase filename
         for pattern in self.high_priority_patterns:
             if pattern.search(filename):
                 return ("high_priority", 100)
@@ -434,7 +449,7 @@ class PDFSmartFilter:
 
         filename_lower = filename.lower()
 
-        # High priority patterns — return positive score
+        # High priority patterns - return positive score
         high_priority_keywords = [
             'manual', 'instruction', 'guide', 'handbook', 'user guide',
             'operation', 'setup', 'installation', 'configuration',
@@ -446,12 +461,21 @@ class PDFSmartFilter:
             if keyword in filename_lower:
                 return 50.0  # Positive score for high priority
 
-        # Low priority patterns — return negative score
+        # Medium priority patterns - return neutral score (allow text matching)
+        medium_priority_keywords = [
+            'product brief', 'overview'
+        ]
+
+        for keyword in medium_priority_keywords:
+            if keyword in filename_lower:
+                return 0.0  # Neutral score for medium priority
+
+        # Low priority patterns - return negative score
         low_priority_keywords = [
             'invoice', 'receipt', 'order', 'price list', 'catalog',
-            'drawing', 'dwg', 'cad', 'schematic', 'reprint', 'brochure',
+            'drawing', 'dwg', 'cad', 'schematic', 'reprint',
             'flyer', 'poster', 'advertisement', 'marketing', 'sales',
-            'part list', 'color code'
+            'part list', 'color code', 'brochure'
         ]
 
         for keyword in low_priority_keywords:
@@ -503,14 +527,14 @@ class PDFSmartFilter:
 class CrossReferenceEngine:
     
     # Maximum number of PDF texts held in the in-process cache.
-    # Each entry is typically 5–20 KB, so 300 entries ≈ 3–6 MB.
+    # Each entry is typically 5-20 KB, so 300 entries ~ 3-6 MB.
     _PDF_CACHE_MAX = 300
 
     def __init__(self):
         self.results = []
         self.parent_gui_processes = []  # Track child processes for cleanup
         self.pdf_filter = PDFSmartFilter()  # Initialize smart PDF filtering
-        self._pdf_text_cache = {}          # path → extracted text (avoids re-reading same PDF)
+        self._pdf_text_cache = {}          # path -> extracted text (avoids re-reading same PDF)
         print("CrossReferenceEngine initialized with smart PDF filtering")
     
     def _get_fallback_memory_gb(self):
@@ -540,10 +564,10 @@ class CrossReferenceEngine:
                     
                     if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(memory_status)):
                         memory_gb = memory_status.ullTotalPhys / (1024**3)
-                        print(f"        ✅ Windows memory detection: {memory_gb:.1f}GB")
+                        print(f"        [OK] Windows memory detection: {memory_gb:.1f}GB")
                         return memory_gb
                 except Exception as e:
-                    print(f"        ⚠️ Windows memory detection failed: {e}")
+                    print(f"        [WARN] Windows memory detection failed: {e}")
             
             # Try to get memory info from /proc/meminfo on Linux
             elif platform.system() == "Linux":
@@ -553,10 +577,10 @@ class CrossReferenceEngine:
                             if line.startswith('MemTotal:'):
                                 memory_kb = int(line.split()[1])
                                 memory_gb = memory_kb / (1024**2)
-                                print(f"        ✅ Linux memory detection: {memory_gb:.1f}GB")
+                                print(f"        [OK] Linux memory detection: {memory_gb:.1f}GB")
                                 return memory_gb
                 except Exception as e:
-                    print(f"        ⚠️ Linux memory detection failed: {e}")
+                    print(f"        [WARNING] Linux memory detection failed: {e}")
             
             # Try to get memory info from sysctl on macOS
             elif platform.system() == "Darwin":
@@ -567,10 +591,10 @@ class CrossReferenceEngine:
                     if result.returncode == 0:
                         memory_bytes = int(result.stdout.strip())
                         memory_gb = memory_bytes / (1024**3)
-                        print(f"        ✅ macOS memory detection: {memory_gb:.1f}GB")
+                        print(f"        [OK] macOS memory detection: {memory_gb:.1f}GB")
                         return memory_gb
                 except Exception as e:
-                    print(f"        ⚠️ macOS memory detection failed: {e}")
+                    print(f"        [WARNING] macOS memory detection failed: {e}")
             
             # Fallback to conservative estimate based on CPU count
             try:
@@ -584,16 +608,16 @@ class CrossReferenceEngine:
                 else:
                     estimated_memory = 4.0   # Basic system
                 
-                print(f"        ⚠️ Using CPU-based memory estimation: {estimated_memory:.1f}GB")
+                print(f"        [WARNING] Using CPU-based memory estimation: {estimated_memory:.1f}GB")
                 return estimated_memory
             except Exception as e:
-                print(f"        ⚠️ CPU count detection failed: {e}")
-                print(f"        💡 Using conservative default: 8.0GB")
+                print(f"        [WARNING] CPU count detection failed: {e}")
+                print(f"         Using conservative default: 8.0GB")
                 return 8.0
             
         except Exception as e:
-            print(f"        ⚠️ All memory detection methods failed: {e}")
-            print(f"        💡 Using conservative default: 8.0GB")
+            print(f"        [WARNING] All memory detection methods failed: {e}")
+            print(f"         Using conservative default: 8.0GB")
             return 8.0
     
     def run_cross_reference(self, input_file, master_file, pdf_dir, threshold=75, test_mode=False, clean_output=True):
@@ -601,25 +625,25 @@ class CrossReferenceEngine:
         if not clean_output:
             print("=== STARTING CROSS-REFERENCE ANALYSIS ===")
             if test_mode:
-                print("🧪 TEST MODE ENABLED - Processing limited items")
+                print("[TEST] TEST MODE ENABLED - Processing limited items")
         
         try:
             # Validate inputs
             if not all([input_file, master_file, pdf_dir]):
-                print("❌ Missing required inputs")
+                print("[ERROR] Missing required inputs")
                 return False
             
             # Validate files exist
             if not os.path.exists(input_file):
-                print(f"❌ Input file not found: {input_file}")
+                print(f"[ERROR] Input file not found: {input_file}")
                 return False
             
             if not os.path.exists(master_file):
-                print(f"❌ Master file not found: {master_file}")
+                print(f"[ERROR] Master file not found: {master_file}")
                 return False
             
             if not os.path.exists(pdf_dir):
-                print(f"❌ PDF directory not found: {pdf_dir}")
+                print(f"[ERROR] PDF directory not found: {pdf_dir}")
                 return False
             
             # Check PDF directory structure
@@ -637,65 +661,65 @@ class CrossReferenceEngine:
                         total_pdf_files += 1
             
             if not pdf_files_found:
-                print(f"❌ No PDF files found in directory: {pdf_dir}")
+                print(f"[ERROR] No PDF files found in directory: {pdf_dir}")
                 if not clean_output:
                     print("Expected structure:")
                     print("  PDFs/")
-                    print("  ├── Supplier1/")
-                    print("  │   ├── document1.pdf")
-                    print("  │   └── document2.pdf")
-                    print("  └── Supplier2/")
-                    print("      └── document3.pdf")
+                    print("   Supplier1/")
+                    print("      document1.pdf")
+                    print("      document2.pdf")
+                    print("   Supplier2/")
+                    print("       document3.pdf")
                 return False
             
             if not clean_output:
-                print(f"✅ Found {supplier_count} supplier folders with {total_pdf_files} PDF files")
-                print("✅ File validation passed")
+                print(f"[OK] Found {supplier_count} supplier folders with {total_pdf_files} PDF files")
+                print("[OK] File validation passed")
             
             # Load input file
             try:
                 if not clean_output:
-                    print(f"📂 Loading input file: {input_file}")
+                    print(f"[DIR] Loading input file: {input_file}")
                 input_df = pd.read_excel(input_file)
                 if not clean_output:
-                    print(f"✅ Input file loaded: {len(input_df)} rows")
-                    print(f"📋 Input file columns: {list(input_df.columns)}")
+                    print(f"[OK] Input file loaded: {len(input_df)} rows")
+                    print(f"[LIST] Input file columns: {list(input_df.columns)}")
                     
-                    print("📄 First 3 rows of input file:")
+                    print("[FILE] First 3 rows of input file:")
                     for idx, row in input_df.head(3).iterrows():
                         print(f"  Row {idx}: {dict(row)}")
                     
             except Exception as e:
-                print(f"❌ Failed to load input file: {e}")
+                print(f"[ERROR] Failed to load input file: {e}")
                 if not clean_output:
                     import traceback
-                    print(f"❌ Traceback: {traceback.format_exc()}")
+                    print(f"[ERROR] Traceback: {traceback.format_exc()}")
                 return False
             
             # Load master file
             try:
                 if not clean_output:
-                    print(f"📂 Loading master file: {master_file}")
+                    print(f"[DIR] Loading master file: {master_file}")
                 master_df = pd.read_excel(master_file)
                 if not clean_output:
-                    print(f"✅ Master file loaded: {len(master_df)} rows")
-                    print(f"📋 Master file columns: {list(master_df.columns)}")
+                    print(f"[OK] Master file loaded: {len(master_df)} rows")
+                    print(f"[LIST] Master file columns: {list(master_df.columns)}")
                     
-                    print("📄 First 3 rows of master file:")
+                    print("[FILE] First 3 rows of master file:")
                     for idx, row in master_df.head(3).iterrows():
                         print(f"  Row {idx}: {dict(row)}")
                     
             except Exception as e:
-                print(f"❌ Failed to load master file: {e}")
+                print(f"[ERROR] Failed to load master file: {e}")
                 if not clean_output:
                     import traceback
-                    print(f"❌ Traceback: {traceback.format_exc()}")
+                    print(f"[ERROR] Traceback: {traceback.format_exc()}")
                 return False
             
             # Validate required supplier column exists before processing
             supplier_col_names = ['Supplier Name', 'Supplier', 'Vendor', 'Company']
             if not any(col in input_df.columns for col in supplier_col_names):
-                print(f"❌ No supplier column found in input file. Available columns: {list(input_df.columns)}")
+                print(f"[ERROR] No supplier column found in input file. Available columns: {list(input_df.columns)}")
                 print(f"   Expected one of: {supplier_col_names}")
                 return False
 
@@ -709,17 +733,17 @@ class CrossReferenceEngine:
             # SAFETY LIMIT: Only limit if extremely large to prevent memory issues
             if total_items > 1000:
                 total_items = 1000
-                print(f"🛡️ SAFETY LIMIT: Processing first {total_items} items to prevent memory issues")
+                print(f" SAFETY LIMIT: Processing first {total_items} items to prevent memory issues")
                 input_df = input_df.head(1000)  # Take first 1000 rows
             else:
-                print(f"📊 Processing all {total_items} items")
+                print(f"[CHART] Processing all {total_items} items")
             
             # Limit items in test mode
             if test_mode:
                 total_items = min(total_items, 20)  # Process first 20 items in test mode
                 input_df = input_df.head(20)  # Only take first 20 rows
                 if not clean_output:
-                    print(f"🧪 TEST MODE: Processing only first {total_items} items")
+                    print(f"[TEST] TEST MODE: Processing only first {total_items} items")
             
             print(f"Processing {total_items} items...")
             
@@ -731,12 +755,12 @@ class CrossReferenceEngine:
             for idx, row in input_df.iterrows():
                 # Check main loop timeout
                 if time.time() - main_loop_start > main_loop_timeout:
-                    print(f"🚨 MAIN LOOP TIMEOUT: Exceeded {main_loop_timeout/60:.1f} minutes, stopping")
+                    print(f"[ALERT] MAIN LOOP TIMEOUT: Exceeded {main_loop_timeout/60:.1f} minutes, stopping")
                     break
                 
                 # Check if analysis should be stopped
                 if hasattr(self, 'stop_analysis') and self.stop_analysis:
-                    print("🛑 Analysis stopped by user")
+                    print(" Analysis stopped by user")
                     return False
                     
                 processed_items += 1
@@ -784,7 +808,7 @@ class CrossReferenceEngine:
                     
                     # Skip items marked as "Non-Instrument"
                     if item_type and item_type.lower() == 'non-instrument':
-                        print(f"  ⏭️ Skipping - marked as Non-Instrument")
+                        print(f"   Skipping - marked as Non-Instrument")
                         skipped_items += 1
                         continue
                     
@@ -794,10 +818,10 @@ class CrossReferenceEngine:
                         print(f"  Using row index as identifier: {item_code}")
                     
                     if not description:
-                        print(f"  ❌ Skipping - missing description")
+                        print(f"  [ERROR] Skipping - missing description")
                         continue
                     
-                    print(f"  🔍 Starting PDF search for: {item_code}")
+                    print(f"   Starting PDF search for: {item_code}")
                     
                     # Find matches
                     matches = self.find_matching_pdfs(item_code, description, category, pdf_dir, master_df, threshold, input_df)
@@ -805,7 +829,7 @@ class CrossReferenceEngine:
                     if matches:
                         items_with_matches += 1
                         total_matches += len(matches)
-                        print(f"  ✅ Found {len(matches)} matches")
+                        print(f"  [OK] Found {len(matches)} matches")
                         
                         # Add to results
                         for match in matches:
@@ -818,10 +842,10 @@ class CrossReferenceEngine:
                                 'Supplier': match['supplier']
                             })
                     else:
-                        print(f"  ❌ No matches found")
+                        print(f"  [ERROR] No matches found")
                         
                 except Exception as e:
-                    print(f"  ❌ Error processing item {item_code}: {e}")
+                    print(f"  [ERROR] Error processing item {item_code}: {e}")
                     import traceback
                     print(f"  Traceback: {traceback.format_exc()}")
                     continue
@@ -844,7 +868,7 @@ class CrossReferenceEngine:
                 print(f"Items with no matches: {processed_items - items_with_matches}")
                 if processed_items - items_with_matches > 0:
                     print(f"Match rate: {(items_with_matches / processed_items) * 100:.1f}%")
-                    print("💡 If no matches are found, check:")
+                    print(" If no matches are found, check:")
                     print("  1. Supplier directory names match input file supplier names")
                     print("  2. PDF files contain the expected keywords")
                     print("  3. PDF text extraction is working properly")
@@ -853,11 +877,11 @@ class CrossReferenceEngine:
             # FINAL CLEANUP - Critical for preventing hanging
             self.cleanup_processes()
             
-            print("✅ Cross-reference analysis completed successfully")
+            print("[OK] Cross-reference analysis completed successfully")
             return True
             
         except Exception as e:
-            print(f"❌ Cross-reference analysis failed: {e}")
+            print(f"[ERROR] Cross-reference analysis failed: {e}")
             # Ensure cleanup even on failure
             self.cleanup_processes()
             return False
@@ -869,87 +893,91 @@ class CrossReferenceEngine:
         print("=" * 60)
         
         if items_with_matches > 0:
-            print(f"✅ Found {total_matches} matches for {items_with_matches} items")
+            print(f"[OK] Found {total_matches} matches for {items_with_matches} items")
             avg_matches = total_matches / items_with_matches
-            print(f"📊 Average: {avg_matches:.1f} matches per item")
+            print(f"[CHART] Average: {avg_matches:.1f} matches per item")
             
             # Show all matches in clean format
-            print("\n📋 MATCH RESULTS:")
+            print("\n[LIST] MATCH RESULTS:")
             total_pdfs = len(self.results)
             for i, result in enumerate(self.results, 1):
                 # Extract filename from full path
                 pdf_filename = os.path.basename(result['Matched PDF'])
-                print(f"✅ MATCH! PDF {i}/{total_pdfs}: {pdf_filename} (Score: {result['Match Score']:.1f}%)")
+                print(f"[OK] MATCH! PDF {i}/{total_pdfs}: {pdf_filename} (Score: {result['Match Score']:.1f}%)")
         else:
-            print("❌ No matches found")
-            print("💡 Try lowering the threshold or checking your data")
+            print("[ERROR] No matches found")
+            print(" Try lowering the threshold or checking your data")
         
-        print(f"\n📈 Statistics:")
-        print(f"  • Items processed: {processed_items}")
-        print(f"  • Items with matches: {items_with_matches}")
-        print(f"  • Items skipped: {skipped_items}")
+        print(f"\n Statistics:")
+        print(f"  - Items processed: {processed_items}")
+        print(f"  - Items with matches: {items_with_matches}")
+        print(f"  - Items skipped: {skipped_items}")
         
         if processed_items > 0:
             match_rate = (items_with_matches / processed_items) * 100
-            print(f"  • Match rate: {match_rate:.1f}%")
+            print(f"  - Match rate: {match_rate:.1f}%")
         
         print("=" * 60)
 
     def run_cross_reference_by_supplier(self, input_file, master_file, pdf_dir, threshold=60, test_mode=False, low_cpu_mode=False, clean_output=True):
         """Process suppliers one by one in alphabetical order - naturally completes when done."""
+        # Store config on instance for use in processing functions
+        self.low_cpu_mode = low_cpu_mode
+        self.test_mode = test_mode
+
         print("=== STARTING SUPPLIER-BY-SUPPLIER CROSS-REFERENCE ANALYSIS ===")
-        print("🎯 Processing each supplier directory in alphabetical order")
-        print("🏁 Will naturally complete when all supplier directories are processed")
-        
+        print("[*] Processing each supplier directory in alphabetical order")
+        print("[*] Will naturally complete when all supplier directories are processed")
+
         if test_mode:
-            print("🧪 TEST MODE ENABLED - Processing limited suppliers")
+            print("[TEST] TEST MODE ENABLED - Processing limited suppliers")
         
         try:
             # Validate inputs
             if not all([input_file, master_file, pdf_dir]):
-                print("❌ Missing required inputs")
+                print("[ERROR] Missing required inputs")
                 return False
             
             # Validate files exist
             if not os.path.exists(input_file):
-                print(f"❌ Input file not found: {input_file}")
+                print(f"[ERROR] Input file not found: {input_file}")
                 return False
             
             if not os.path.exists(master_file):
-                print(f"❌ Master file not found: {master_file}")
+                print(f"[ERROR] Master file not found: {master_file}")
                 return False
             
             if not os.path.exists(pdf_dir):
-                print(f"❌ PDF directory not found: {pdf_dir}")
+                print(f"[ERROR] PDF directory not found: {pdf_dir}")
                 return False
             
             # Load input file
             try:
                 input_df = pd.read_excel(input_file)
-                print(f"✅ Loaded input file: {len(input_df)} items")
+                print(f"[OK] Loaded input file: {len(input_df)} items")
             except Exception as e:
-                print(f"❌ Error loading input file: {e}")
+                print(f"[ERROR] Error loading input file: {e}")
                 return False
             
             # Load master file
             try:
                 master_df = pd.read_excel(master_file)
-                print(f"✅ Loaded master file: {len(master_df)} suppliers")
+                print(f"[OK] Loaded master file: {len(master_df)} suppliers")
             except Exception as e:
-                print(f"❌ Error loading master file: {e}")
+                print(f"[ERROR] Error loading master file: {e}")
                 return False
             
             # Get all supplier directories in alphabetical order
             supplier_directories = sorted([d for d in os.listdir(pdf_dir) 
                                          if os.path.isdir(os.path.join(pdf_dir, d))])
             
-            print(f"📂 Found {len(supplier_directories)} supplier directories to process")
-            print(f"📋 Suppliers: {supplier_directories[:10]}{'...' if len(supplier_directories) > 10 else ''}")
-            print(f"🔄 Each supplier will be processed individually with progress indicators")
+            print(f"[DIR] Found {len(supplier_directories)} supplier directories to process")
+            print(f"[LIST] Suppliers: {supplier_directories[:10]}{'...' if len(supplier_directories) > 10 else ''}")
+            print(f"[LOOP] Each supplier will be processed individually with progress indicators")
             
             if test_mode and len(supplier_directories) > 5:
                 supplier_directories = supplier_directories[:5]
-                print(f"🧪 TEST MODE: Limited to first {len(supplier_directories)} suppliers")
+                print(f"[TEST] TEST MODE: Limited to first {len(supplier_directories)} suppliers")
             
             # Initialize counters
             processed_suppliers = 0
@@ -967,12 +995,12 @@ class CrossReferenceEngine:
             for supplier_idx, supplier_dir in enumerate(supplier_directories, 1):
                 # Check timeout
                 if time.time() - start_time > max_total_time:
-                    print(f"🚨 OVERALL TIMEOUT: Exceeded {max_total_time/60:.1f} minutes, stopping")
+                    print(f"[ALERT] OVERALL TIMEOUT: Exceeded {max_total_time/60:.1f} minutes, stopping")
                     break
                 
                 # Check if analysis should be stopped
                 if hasattr(self, 'stop_analysis') and self.stop_analysis:
-                    print("🛑 Analysis stopped by user")
+                    print(" Analysis stopped by user")
                     return False
                 
                 # Calculate progress and timing information
@@ -990,9 +1018,9 @@ class CrossReferenceEngine:
                     eta_display = ""
                 
                 print(f"\n{'='*80}")
-                print(f"🏢 PROCESSING SUPPLIER {supplier_idx}/{len(supplier_directories)} ({progress_percentage:.1f}%)")
-                print(f"📂 Supplier: {supplier_dir}")
-                print(f"⏱️  Elapsed: {elapsed_time/60:.1f}m{eta_display}")
+                print(f"[BUILDING] PROCESSING SUPPLIER {supplier_idx}/{len(supplier_directories)} ({progress_percentage:.1f}%)")
+                print(f"[DIR] Supplier: {supplier_dir}")
+                print(f"[TIMER]  Elapsed: {elapsed_time/60:.1f}m{eta_display}")
                 print(f"{'='*80}")
                 processed_suppliers += 1
                 
@@ -1012,9 +1040,9 @@ class CrossReferenceEngine:
                 
                 if len(supplier_items) == 0:
                     if len(all_supplier_items) > 0:
-                        print(f"  ⚠️ All {len(all_supplier_items)} items for supplier '{supplier_dir}' were Non-Instrument/Software, skipping...")
+                        print(f"  [WARNING] All {len(all_supplier_items)} items for supplier '{supplier_dir}' were Non-Instrument/Software, skipping...")
                     else:
-                        print(f"  ⚠️ No items found for supplier '{supplier_dir}', skipping...")
+                        print(f"  [WARNING] No items found for supplier '{supplier_dir}', skipping...")
                     continue
                 
                 # Get all PDFs for this supplier
@@ -1022,17 +1050,17 @@ class CrossReferenceEngine:
                 pdf_files = [f for f in os.listdir(supplier_path) if f.lower().endswith('.pdf')]
                 
                 if not pdf_files:
-                    print(f"  ⚠️ No PDF files found for supplier '{supplier_dir}', skipping...")
+                    print(f"  [WARNING] No PDF files found for supplier '{supplier_dir}', skipping...")
                     continue
                 
-                print(f"  📄 Found {len(pdf_files)} PDF files for this supplier")
+                print(f"  [FILE] Found {len(pdf_files)} PDF files for this supplier")
                 
                 # Apply smart PDF filtering to prioritize useful PDFs and filter out noise
-                print(f"  🎯 Applying smart PDF filtering...")
+                print(f"  [TARGET] Applying smart PDF filtering...")
                 filtered_pdfs = self.pdf_filter.filter_and_prioritize_pdfs(pdf_files)
                 
                 if not filtered_pdfs:
-                    print(f"  ❌ No PDFs passed smart filtering (all were noise), skipping supplier...")
+                    print(f"  [ERROR] No PDFs passed smart filtering (all were noise), skipping supplier...")
                     continue
                 
                 # Show filtering results
@@ -1040,7 +1068,7 @@ class CrossReferenceEngine:
                 for _, category, _ in filtered_pdfs:
                     category_counts[category] = category_counts.get(category, 0) + 1
                 
-                print(f"  📊 Smart filtering results:")
+                print(f"  [CHART] Smart filtering results:")
                 print(f"    Original PDFs: {len(pdf_files)}")
                 print(f"    After filtering: {len(filtered_pdfs)}")
                 print(f"    Filtered out: {len(pdf_files) - len(filtered_pdfs)} PDFs ({((len(pdf_files) - len(filtered_pdfs)) / len(pdf_files) * 100):.1f}%)")
@@ -1061,19 +1089,19 @@ class CrossReferenceEngine:
                 if supplier_matches > 0:
                     suppliers_with_matches += 1
                     total_matches += supplier_matches
-                    print(f"  ✅ Supplier '{supplier_dir}': {supplier_matches} matches found from {len(supplier_items)} items")
+                    print(f"  [OK] Supplier '{supplier_dir}': {supplier_matches} matches found from {len(supplier_items)} items")
                 else:
-                    print(f"  ❌ Supplier '{supplier_dir}': No matches found from {len(supplier_items)} items")
+                    print(f"  [ERROR] Supplier '{supplier_dir}': No matches found from {len(supplier_items)} items")
                 
                 # Display completion summary for this supplier
                 current_time = time.time()
                 total_elapsed = current_time - start_time
                 if supplier_idx > 1:
                     supplier_time = total_elapsed / supplier_idx
-                    print(f"  📊 Supplier completed (avg {supplier_time:.1f}s per supplier)")
+                    print(f"  [CHART] Supplier completed (avg {supplier_time:.1f}s per supplier)")
                 else:
-                    print(f"  📊 Supplier completed")
-                print(f"  📈 Overall progress: {processed_suppliers}/{len(supplier_directories)} suppliers, {total_matches} total matches")
+                    print(f"  [CHART] Supplier completed")
+                print(f"   Overall progress: {processed_suppliers}/{len(supplier_directories)} suppliers, {total_matches} total matches")
                 
                 # Memory cleanup after each supplier
                 import gc
@@ -1083,25 +1111,25 @@ class CrossReferenceEngine:
             self.cleanup_processes()
             
             total_time = time.time() - start_time
-            print(f"\n🏁 SUPPLIER-BY-SUPPLIER ANALYSIS COMPLETE")
-            print(f"⏱️ Total time: {total_time:.1f} seconds ({total_time/60:.1f} minutes)")
-            print(f"📊 Processed {processed_suppliers} suppliers")
-            print(f"📊 Processed {processed_items} Instrument items")
-            print(f"📊 Skipped {total_skipped_items} Non-Instrument/Software items")
-            print(f"📊 Found {total_matches} total matches")
-            print(f"📊 {suppliers_with_matches}/{processed_suppliers} suppliers had matches")
+            print(f"\n SUPPLIER-BY-SUPPLIER ANALYSIS COMPLETE")
+            print(f"[TIMER] Total time: {total_time:.1f} seconds ({total_time/60:.1f} minutes)")
+            print(f"[CHART] Processed {processed_suppliers} suppliers")
+            print(f"[CHART] Processed {processed_items} Instrument items")
+            print(f"[CHART] Skipped {total_skipped_items} Non-Instrument/Software items")
+            print(f"[CHART] Found {total_matches} total matches")
+            print(f"[CHART] {suppliers_with_matches}/{processed_suppliers} suppliers had matches")
             
             if total_matches > 0:
                 match_rate = (suppliers_with_matches / processed_suppliers) * 100 if processed_suppliers > 0 else 0
-                print(f"📊 Supplier match rate: {match_rate:.1f}%")
+                print(f"[CHART] Supplier match rate: {match_rate:.1f}%")
                 if processed_items > 0:
                     item_match_rate = (total_matches / processed_items) * 100
-                    print(f"📊 Item match rate: {item_match_rate:.1f}% ({total_matches}/{processed_items} items found matches)")
+                    print(f"[CHART] Item match rate: {item_match_rate:.1f}% ({total_matches}/{processed_items} items found matches)")
             
             return True
             
         except Exception as e:
-            print(f"❌ Supplier-by-supplier analysis failed: {e}")
+            print(f"[ERROR] Supplier-by-supplier analysis failed: {e}")
             self.cleanup_processes()
             return False
 
@@ -1117,7 +1145,7 @@ class CrossReferenceEngine:
                 
                 if len(potential_items) > 0:
                     supplier_items = potential_items
-                    print(f"    📋 Found {len(supplier_items)} total items in column '{col_name}'")
+                    print(f"    [LIST] Found {len(supplier_items)} total items in column '{col_name}'")
                     break
         
         # Filter out Non-Instrument and Software items
@@ -1140,10 +1168,10 @@ class CrossReferenceEngine:
                 skipped_count = before_filter - filtered_count
                 
                 if skipped_count > 0:
-                    print(f"    ⏭️ Filtered out {skipped_count} Non-Instrument/Software items")
-                print(f"    🎯 Processing {filtered_count} Instrument items for this supplier")
+                    print(f"     Filtered out {skipped_count} Non-Instrument/Software items")
+                print(f"    [TARGET] Processing {filtered_count} Instrument items for this supplier")
             else:
-                print(f"    ⚠️ No TYPE column found - processing all {len(supplier_items)} items")
+                print(f"    [WARNING] No TYPE column found - processing all {len(supplier_items)} items")
         
         return supplier_items
 
@@ -1157,7 +1185,7 @@ class CrossReferenceEngine:
         for item_idx, (idx, row) in enumerate(supplier_items.iterrows(), 1):
             # Check if analysis should be stopped
             if hasattr(self, 'stop_analysis') and self.stop_analysis:
-                print("      🛑 Analysis stopped by user")
+                print("       Analysis stopped by user")
                 break
             
             # Extract item information
@@ -1170,20 +1198,20 @@ class CrossReferenceEngine:
             
             # Skip items marked as "Non-Instrument" or "Software" - only process "Instruments"
             if item_type and item_type.lower() in ['non-instrument', 'software']:
-                print(f"      ⏭️ Item {item_idx}: Skipping {item_type} - {item_code}")
+                print(f"       Item {item_idx}: Skipping {item_type} - {item_code}")
                 continue
             
             if not description:
-                print(f"      ⚠️ Item {item_idx}: No description found, skipping")
+                print(f"      [WARNING] Item {item_idx}: No description found, skipping")
                 continue
             
             item_progress = (item_idx / len(supplier_items)) * 100
-            print(f"      🔍 Item {item_idx}/{len(supplier_items)} ({item_progress:.1f}%): {item_code} - {description[:50]}...")
+            print(f"       Item {item_idx}/{len(supplier_items)} ({item_progress:.1f}%): {item_code} - {description[:50]}...")
             
             # Extract keywords for this item
             search_keywords = self.extract_keywords(description, category)
             if not search_keywords:
-                print(f"      ⚠️ No keywords extracted for item {item_code}")
+                print(f"      [WARNING] No keywords extracted for item {item_code}")
                 continue
             
             # Process this item against all PDFs in this supplier's directory
@@ -1191,7 +1219,7 @@ class CrossReferenceEngine:
             
             if matches:
                 supplier_matches += len(matches)
-                print(f"      ✅ Item {item_code}: {len(matches)} matches found")
+                print(f"      [OK] Item {item_code}: {len(matches)} matches found")
                 
                 # Add to results
                 for match in matches:
@@ -1204,7 +1232,7 @@ class CrossReferenceEngine:
                         'Supplier': supplier_dir
                     })
             else:
-                print(f"      ❌ Item {item_code}: No matches found")
+                print(f"      [ERROR] Item {item_code}: No matches found")
         
         return supplier_matches
 
@@ -1253,24 +1281,24 @@ class CrossReferenceEngine:
         
         try:
             # This method is kept for compatibility but now uses supplier-by-supplier approach
-            print(f"    🔍 Legacy method called for item: {item_code}")
-            print(f"    💡 Consider using run_cross_reference_by_supplier for better performance")
+            print(f"     Legacy method called for item: {item_code}")
+            print(f"     Consider using run_cross_reference_by_supplier for better performance")
             return matches
             
         except Exception as e:
-            print(f"    ❌ Error in find_matching_pdfs: {e}")
+            print(f"    [ERROR] Error in find_matching_pdfs: {e}")
             return matches
 
     def find_matching_pdfs_high_performance(self, item_code, description, category, pdf_dir, master_df, threshold, input_df=None, low_cpu_mode=False):
         """High-performance PDF matching using multiprocessing - now uses supplier-by-supplier approach."""
         try:
             # This method is kept for compatibility but now uses supplier-by-supplier approach
-            print(f"    🔍 Legacy high-performance method called for item: {item_code}")
-            print(f"    💡 Consider using run_cross_reference_by_supplier for better performance")
+            print(f"     Legacy high-performance method called for item: {item_code}")
+            print(f"     Consider using run_cross_reference_by_supplier for better performance")
             return []
             
         except Exception as e:
-            print(f"    ❌ Error in find_matching_pdfs_high_performance: {e}")
+            print(f"    [ERROR] Error in find_matching_pdfs_high_performance: {e}")
             return []
 
     def extract_keywords(self, description, category):
@@ -1301,10 +1329,10 @@ class CrossReferenceEngine:
         Process PDFs with timeout protection and proper cleanup.
         """
         if not pdf_file_paths:
-            print("❌ No PDF files to process")
+            print("[ERROR] No PDF files to process")
             return []
         
-        print(f"🔄 Processing {len(pdf_file_paths)} PDFs in parallel...")
+        print(f"[LOOP] Processing {len(pdf_file_paths)} PDFs in parallel...")
         matches = []
         processed_count = 0
         
@@ -1337,25 +1365,25 @@ class CrossReferenceEngine:
                         
                         # Progress update and memory cleanup
                         if processed_count % 50 == 0:
-                            print(f"📊 Processed {processed_count}/{len(pdf_file_paths)} PDFs")
+                            print(f"[CHART] Processed {processed_count}/{len(pdf_file_paths)} PDFs")
                             import gc
                             gc.collect()
                         
                         # Check stop flag
                         if GlobalStopManager.should_stop():
-                            print("🛑 Processing stopped by global flag")
+                            print(" Processing stopped by global flag")
                             break
                             
                     except TimeoutError:
-                        print(f"⏰ Timeout processing {os.path.basename(pdf_path)}")
+                        print(f"[TIMEOUT] Timeout processing {os.path.basename(pdf_path)}")
                     except Exception as e:
-                        print(f"❌ Error processing {os.path.basename(pdf_path)}: {e}")
+                        print(f"[ERROR] Error processing {os.path.basename(pdf_path)}: {e}")
                 
                 # Explicit shutdown with cancellation of pending tasks
                 executor.shutdown(wait=False, cancel_futures=True)
                 
         except Exception as e:
-            print(f"❌ Parallel processing failed: {e}")
+            print(f"[ERROR] Parallel processing failed: {e}")
             # Fallback to sequential processing
             return self.process_pdfs_sequential(pdf_file_paths, search_keywords, description, threshold, low_cpu_mode)
         
@@ -1364,7 +1392,7 @@ class CrossReferenceEngine:
             import gc
             gc.collect()
         
-        print(f"✅ Parallel processing complete: {len(matches)} matches found")
+        print(f"[OK] Parallel processing complete: {len(matches)} matches found")
         return matches
 
     def find_matching_pdfs(self, item_code, description, category, pdf_dir, master_df, threshold, input_df=None):
@@ -1377,7 +1405,7 @@ class CrossReferenceEngine:
             search_keywords = self.extract_keywords(description, category)
             
             if not search_keywords:
-                print("    ❌ No keywords extracted")
+                print("    [ERROR] No keywords extracted")
                 return matches
             
             # Find the specific supplier for this item
@@ -1411,19 +1439,19 @@ class CrossReferenceEngine:
                     except Exception as e:
                         print(f"    Warning: Could not find supplier for item {item_code}: {e}")
                 else:
-                    print(f"    ❌ No supplier column found in input file. Available columns: {list(input_df.columns)}")
+                    print(f"    [ERROR] No supplier column found in input file. Available columns: {list(input_df.columns)}")
             else:
-                print(f"    ❌ No input_df provided for supplier lookup")
+                print(f"    [ERROR] No input_df provided for supplier lookup")
             
             if not current_supplier or current_supplier == 'nan' or current_supplier == '':
-                print(f"    ❌ No supplier found for item {item_code}, skipping")
+                print(f"    [ERROR] No supplier found for item {item_code}, skipping")
                 return matches
             
-            print(f"    🎯 Looking for supplier directory: '{current_supplier}'")
+            print(f"    [TARGET] Looking for supplier directory: '{current_supplier}'")
             
             # Get all available supplier directories
             available_suppliers = [d for d in os.listdir(pdf_dir) if os.path.isdir(os.path.join(pdf_dir, d))]
-            print(f"    📂 Available supplier directories ({len(available_suppliers)}): {available_suppliers}")
+            print(f"    [DIR] Available supplier directories ({len(available_suppliers)}): {available_suppliers}")
             
             # Try to find a matching supplier directory with multiple strategies
             matching_supplier_dir = None
@@ -1432,7 +1460,7 @@ class CrossReferenceEngine:
             for available_supplier in available_suppliers:
                 if current_supplier.lower() == available_supplier.lower():
                     matching_supplier_dir = available_supplier
-                    print(f"      ✅ Exact match found: '{current_supplier}' -> '{available_supplier}'")
+                    print(f"      [OK] Exact match found: '{current_supplier}' -> '{available_supplier}'")
                     break
             
             # Strategy 2: Partial matching (if exact match not found)
@@ -1440,7 +1468,7 @@ class CrossReferenceEngine:
                 for available_supplier in available_suppliers:
                     if current_supplier.lower() in available_supplier.lower() or available_supplier.lower() in current_supplier.lower():
                         matching_supplier_dir = available_supplier
-                        print(f"      ⚠️ Using partial match: '{current_supplier}' -> '{available_supplier}'")
+                        print(f"      [WARNING] Using partial match: '{current_supplier}' -> '{available_supplier}'")
                         break
             
             # Strategy 3: Word-based matching (if still no match)
@@ -1452,7 +1480,7 @@ class CrossReferenceEngine:
                     common_words = current_words.intersection(available_words)
                     if len(common_words) >= max(1, len(current_words) * 0.5):
                         matching_supplier_dir = available_supplier
-                        print(f"      🔍 Using word-based match: '{current_supplier}' -> '{available_supplier}' (common words: {common_words})")
+                        print(f"       Using word-based match: '{current_supplier}' -> '{available_supplier}' (common words: {common_words})")
                         break
             
             # Strategy 4: Remove common suffixes/prefixes and try again
@@ -1472,7 +1500,7 @@ class CrossReferenceEngine:
                         cleaned_current = cleaned_current[len(prefix):].strip()
                         break
                 
-                print(f"      🔧 Trying cleaned supplier name: '{cleaned_current}'")
+                print(f"       Trying cleaned supplier name: '{cleaned_current}'")
                 
                 for available_supplier in available_suppliers:
                     cleaned_available = available_supplier.lower()
@@ -1488,15 +1516,15 @@ class CrossReferenceEngine:
                     
                     if cleaned_current == cleaned_available:
                         matching_supplier_dir = available_supplier
-                        print(f"      ✅ Cleaned name match: '{current_supplier}' -> '{available_supplier}'")
+                        print(f"      [OK] Cleaned name match: '{current_supplier}' -> '{available_supplier}'")
                         break
             
             if not matching_supplier_dir:
-                print(f"      ❌ No matching supplier directory found for '{current_supplier}'")
-                print(f"      💡 Available directories: {available_suppliers}")
+                print(f"      [ERROR] No matching supplier directory found for '{current_supplier}'")
+                print(f"       Available directories: {available_suppliers}")
                 
                 # Show similarity scores for all available directories
-                print(f"      🔍 Similarity analysis:")
+                print(f"       Similarity analysis:")
                 similarities = []
                 for available_supplier in available_suppliers:
                     similarity = SequenceMatcher(None, current_supplier.lower(), available_supplier.lower()).ratio()
@@ -1507,11 +1535,11 @@ class CrossReferenceEngine:
                 similarities.sort(key=lambda x: x[1], reverse=True)
                 if similarities and similarities[0][1] > 0.3:  # If best match is >30% similar
                     best_match = similarities[0]
-                    print(f"      💡 Suggested best match: '{best_match[0]}' (similarity: {best_match[1]:.3f})")
-                    print(f"      ⚠️ Consider manually checking if this is the correct supplier directory")
+                    print(f"       Suggested best match: '{best_match[0]}' (similarity: {best_match[1]:.3f})")
+                    print(f"      [WARNING] Consider manually checking if this is the correct supplier directory")
                 
                 # FALLBACK: If no supplier directory found, search all directories
-                print(f"      🔄 FALLBACK: Searching all PDF directories since no supplier match found")
+                print(f"      [LOOP] FALLBACK: Searching all PDF directories since no supplier match found")
                 all_pdf_files = []
                 for supplier_dir in available_suppliers:
                     supplier_path = os.path.join(pdf_dir, supplier_dir)
@@ -1519,7 +1547,7 @@ class CrossReferenceEngine:
                     for pdf_file in pdf_files:
                         all_pdf_files.append((os.path.join(supplier_path, pdf_file), supplier_dir))
                 
-                print(f"      📂 FALLBACK: Will search {len(all_pdf_files)} PDF files across all directories")
+                print(f"      [DIR] FALLBACK: Will search {len(all_pdf_files)} PDF files across all directories")
                 
                 # Process all PDFs in fallback mode
                 total_pdfs = len(all_pdf_files)
@@ -1528,7 +1556,7 @@ class CrossReferenceEngine:
                 
                 for batch_start in range(0, total_pdfs, batch_size):
                     if hasattr(self, 'stop_analysis') and self.stop_analysis:
-                        print("        🛑 Analysis stopped by user")
+                        print("         Analysis stopped by user")
                         return matches
                         
                     batch_end = min(batch_start + batch_size, total_pdfs)
@@ -1538,7 +1566,7 @@ class CrossReferenceEngine:
                     
                     for pdf_idx, (pdf_path, supplier_dir) in enumerate(batch_pdfs, batch_start + 1):
                         if hasattr(self, 'stop_analysis') and self.stop_analysis:
-                            print("          🛑 Analysis stopped by user")
+                            print("           Analysis stopped by user")
                             return matches
                             
                         pdf_start_time = time.time()
@@ -1550,17 +1578,17 @@ class CrossReferenceEngine:
                             pdf_text = self.extract_pdf_text(pdf_path)
                             
                             if not pdf_text:
-                                print(f"            ❌ Could not extract text")
+                                print(f"            [ERROR] Could not extract text")
                                 continue
                             
-                            print(f"            ✅ Extracted {len(pdf_text)} characters")
+                            print(f"            [OK] Extracted {len(pdf_text)} characters")
                             
                             # Calculate match score
                             score = self.calculate_match_score(search_keywords, pdf_text, description, threshold)
-                            print(f"            📊 Final Score: {score:.1f}% (threshold: {threshold}%)")
+                            print(f"            [CHART] Final Score: {score:.1f}% (threshold: {threshold}%)")
                             
                             if score >= threshold:
-                                print(f"            ✅ FALLBACK MATCH! Score {score:.1f}% >= {threshold}%")
+                                print(f"            [OK] FALLBACK MATCH! Score {score:.1f}% >= {threshold}%")
                                 matches.append({
                                     'pdf_path': pdf_path,
                                     'score': score,
@@ -1568,24 +1596,24 @@ class CrossReferenceEngine:
                                 })
                                 fallback_matches += 1
                             else:
-                                print(f"            ❌ Below threshold ({score:.1f}% < {threshold}%)")
+                                print(f"            [ERROR] Below threshold ({score:.1f}% < {threshold}%)")
                             
                             pdf_time = time.time() - pdf_start_time
-                            print(f"            ⏱️ PDF processed in {pdf_time:.1f}s")
+                            print(f"            [TIMER] PDF processed in {pdf_time:.1f}s")
                                 
                         except Exception as e:
-                            print(f"            ❌ Error processing fallback PDF: {e}")
+                            print(f"            [ERROR] Error processing fallback PDF: {e}")
                             continue
                     
                     # Memory cleanup after each batch
                     import gc
                     gc.collect()
-                    print(f"        🧹 Fallback batch completed, memory cleaned up")
+                    print(f"        [CLEAN] Fallback batch completed, memory cleaned up")
                 
-                print(f"      📊 Fallback search completed: {fallback_matches} matches found")
+                print(f"      [CHART] Fallback search completed: {fallback_matches} matches found")
                 return matches
             
-            print(f"      ✅ Found matching supplier directory: {matching_supplier_dir}")
+            print(f"      [OK] Found matching supplier directory: {matching_supplier_dir}")
             
             # Check if supplier exists in master file (optional check)
             supplier_found = True  # Skip master file check for now to focus on directory matching
@@ -1600,36 +1628,36 @@ class CrossReferenceEngine:
             if master_supplier_col:
                 supplier_exists = master_df[master_supplier_col].astype(str).str.contains(matching_supplier_dir, case=False, na=False).any()
                 if supplier_exists:
-                    print(f"      ✅ Supplier found in master file column: {master_supplier_col}")
+                    print(f"      [OK] Supplier found in master file column: {master_supplier_col}")
                 else:
-                    print(f"      ⚠️ Supplier '{matching_supplier_dir}' not found in master file, but continuing anyway")
+                    print(f"      [WARNING] Supplier '{matching_supplier_dir}' not found in master file, but continuing anyway")
             
             # Check if supplier directory exists
             supplier_path = os.path.join(pdf_dir, matching_supplier_dir)
             if not os.path.exists(supplier_path):
-                print(f"      ❌ Supplier directory not found: {supplier_path}")
+                print(f"      [ERROR] Supplier directory not found: {supplier_path}")
                 return matches
             
             if not os.path.isdir(supplier_path):
-                print(f"      ❌ Supplier path is not a directory: {supplier_path}")
+                print(f"      [ERROR] Supplier path is not a directory: {supplier_path}")
                 return matches
             
-            print(f"      📂 Using supplier directory: {supplier_path}")
+            print(f"      [DIR] Using supplier directory: {supplier_path}")
             
             # Get PDF files from this specific supplier directory only
             pdf_files = [f for f in os.listdir(supplier_path) if f.lower().endswith('.pdf')]
             print(f"      Found {len(pdf_files)} PDF files in supplier directory")
             
             if not pdf_files:
-                print(f"      ❌ No PDF files in supplier directory")
+                print(f"      [ERROR] No PDF files in supplier directory")
                 return matches
             
             # Apply smart PDF filtering to prioritize useful PDFs and filter out noise
-            print(f"      🎯 Applying smart PDF filtering...")
+            print(f"      [TARGET] Applying smart PDF filtering...")
             filtered_pdfs = self.pdf_filter.filter_and_prioritize_pdfs(pdf_files)
             
             if not filtered_pdfs:
-                print(f"      ❌ No PDFs passed smart filtering (all were noise)")
+                print(f"      [ERROR] No PDFs passed smart filtering (all were noise)")
                 return matches
             
             # Show filtering results
@@ -1637,7 +1665,7 @@ class CrossReferenceEngine:
             for _, category, _ in filtered_pdfs:
                 category_counts[category] = category_counts.get(category, 0) + 1
             
-            print(f"      📊 Smart filtering results:")
+            print(f"      [CHART] Smart filtering results:")
             print(f"        Original PDFs: {len(pdf_files)}")
             print(f"        After filtering: {len(filtered_pdfs)}")
             print(f"        Filtered out: {len(pdf_files) - len(filtered_pdfs)} PDFs ({((len(pdf_files) - len(filtered_pdfs)) / len(pdf_files) * 100):.1f}%)")
@@ -1656,7 +1684,7 @@ class CrossReferenceEngine:
             for batch_start in range(0, total_pdfs, batch_size):
                 # Check if analysis should be stopped
                 if hasattr(self, 'stop_analysis') and self.stop_analysis:
-                    print("        🛑 Analysis stopped by user")
+                    print("         Analysis stopped by user")
                     return matches
                     
                 batch_end = min(batch_start + batch_size, total_pdfs)
@@ -1668,7 +1696,7 @@ class CrossReferenceEngine:
                 for pdf_idx, (pdf_file, pdf_category, pdf_priority) in enumerate(batch_pdfs_with_categories, batch_start + 1):
                     # Check if analysis should be stopped
                     if hasattr(self, 'stop_analysis') and self.stop_analysis:
-                        print("          🛑 Analysis stopped by user")
+                        print("           Analysis stopped by user")
                         return matches
                         
                     pdf_start_time = time.time()
@@ -1680,10 +1708,10 @@ class CrossReferenceEngine:
                         pdf_text = self.extract_pdf_text(pdf_path)
                         
                         if not pdf_text:
-                            print(f"            ❌ Could not extract text")
+                            print(f"            [ERROR] Could not extract text")
                             continue
                         
-                        print(f"            ✅ Extracted {len(pdf_text)} characters")
+                        print(f"            [OK] Extracted {len(pdf_text)} characters")
                         
                         # Calculate match score with priority boost
                         base_score = self.calculate_match_score(search_keywords, pdf_text, description, threshold)
@@ -1699,12 +1727,12 @@ class CrossReferenceEngine:
                         score = min(base_score + priority_boost, 100.0)
                         
                         if priority_boost > 0:
-                            print(f"            📊 Base Score: {base_score:.1f}% + Priority Boost: +{priority_boost} = Final Score: {score:.1f}% (threshold: {threshold}%)")
+                            print(f"            [CHART] Base Score: {base_score:.1f}% + Priority Boost: +{priority_boost} = Final Score: {score:.1f}% (threshold: {threshold}%)")
                         else:
-                            print(f"            📊 Final Score: {score:.1f}% (threshold: {threshold}%)")
+                            print(f"            [CHART] Final Score: {score:.1f}% (threshold: {threshold}%)")
                         
                         if score >= threshold:
-                            print(f"            ✅ MATCH! Score {score:.1f}% >= {threshold}%")
+                            print(f"            [OK] MATCH! Score {score:.1f}% >= {threshold}%")
                             matches.append({
                                 'pdf_path': pdf_path,
                                 'score': score,
@@ -1712,23 +1740,23 @@ class CrossReferenceEngine:
                             })
                             supplier_matches += 1
                         else:
-                            print(f"            ❌ Below threshold ({score:.1f}% < {threshold}%)")
+                            print(f"            [ERROR] Below threshold ({score:.1f}% < {threshold}%)")
                         
                         pdf_time = time.time() - pdf_start_time
-                        print(f"            ⏱️ PDF processed in {pdf_time:.1f}s")
+                        print(f"            [TIMER] PDF processed in {pdf_time:.1f}s")
                             
                     except Exception as e:
-                        print(f"            ❌ Error processing PDF: {e}")
+                        print(f"            [ERROR] Error processing PDF: {e}")
                         continue
                 
                 # Memory cleanup after each batch
                 import gc
                 gc.collect()
-                print(f"        🧹 Batch completed, memory cleaned up")
+                print(f"        [CLEAN] Batch completed, memory cleaned up")
             
             total_time = time.time() - start_time
-            print(f"    ⏱️ Total processing time: {total_time:.1f}s")
-            print(f"    📊 Processed {total_pdfs} PDFs from supplier '{matching_supplier_dir}'")
+            print(f"    [TIMER] Total processing time: {total_time:.1f}s")
+            print(f"    [CHART] Processed {total_pdfs} PDFs from supplier '{matching_supplier_dir}'")
             print(f"    Total matches found: {len(matches)}")
             
             # Deduplicate matches by normalized filename
@@ -1736,12 +1764,12 @@ class CrossReferenceEngine:
                 original_count = len(matches)
                 matches = deduplicate_matches(matches)
                 if len(matches) < original_count:
-                    print(f"    🔄 Deduplication: {original_count} -> {len(matches)} matches")
+                    print(f"    [LOOP] Deduplication: {original_count} -> {len(matches)} matches")
             
             return matches
             
         except Exception as e:
-            print(f"    ❌ Error in find_matching_pdfs: {e}")
+            print(f"    [ERROR] Error in find_matching_pdfs: {e}")
             return matches
 
     def find_matching_pdfs_high_performance(self, item_code, description, category, pdf_dir, master_df, threshold, input_df=None, low_cpu_mode=False):
@@ -1754,7 +1782,7 @@ class CrossReferenceEngine:
             search_keywords = self.extract_keywords(description, category)
             
             if not search_keywords:
-                print("    ❌ No keywords extracted")
+                print("    [ERROR] No keywords extracted")
                 return matches
             
             # Find the specific supplier for this item
@@ -1788,19 +1816,19 @@ class CrossReferenceEngine:
                     except Exception as e:
                         print(f"    Warning: Could not find supplier for item {item_code}: {e}")
                 else:
-                    print(f"    ❌ No supplier column found in input file. Available columns: {list(input_df.columns)}")
+                    print(f"    [ERROR] No supplier column found in input file. Available columns: {list(input_df.columns)}")
             else:
-                print(f"    ❌ No input_df provided for supplier lookup")
+                print(f"    [ERROR] No input_df provided for supplier lookup")
             
             if not current_supplier or current_supplier == 'nan' or current_supplier == '':
-                print(f"    ❌ No supplier found for item {item_code}, skipping")
+                print(f"    [ERROR] No supplier found for item {item_code}, skipping")
                 return matches
             
-            print(f"    🎯 Looking for supplier directory: '{current_supplier}'")
+            print(f"    [TARGET] Looking for supplier directory: '{current_supplier}'")
             
             # Get all available supplier directories
             available_suppliers = [d for d in os.listdir(pdf_dir) if os.path.isdir(os.path.join(pdf_dir, d))]
-            print(f"    📂 Available supplier directories ({len(available_suppliers)}): {available_suppliers}")
+            print(f"    [DIR] Available supplier directories ({len(available_suppliers)}): {available_suppliers}")
             
             # Try to find a matching supplier directory with multiple strategies
             matching_supplier_dir = None
@@ -1809,7 +1837,7 @@ class CrossReferenceEngine:
             for available_supplier in available_suppliers:
                 if current_supplier.lower() == available_supplier.lower():
                     matching_supplier_dir = available_supplier
-                    print(f"      ✅ Exact match found: '{current_supplier}' -> '{available_supplier}'")
+                    print(f"      [OK] Exact match found: '{current_supplier}' -> '{available_supplier}'")
                     break
             
             # Strategy 2: Partial matching (if exact match not found)
@@ -1817,7 +1845,7 @@ class CrossReferenceEngine:
                 for available_supplier in available_suppliers:
                     if current_supplier.lower() in available_supplier.lower() or available_supplier.lower() in current_supplier.lower():
                         matching_supplier_dir = available_supplier
-                        print(f"      ⚠️ Using partial match: '{current_supplier}' -> '{available_supplier}'")
+                        print(f"      [WARNING] Using partial match: '{current_supplier}' -> '{available_supplier}'")
                         break
             
             # Strategy 3: Word-based matching (if still no match)
@@ -1829,7 +1857,7 @@ class CrossReferenceEngine:
                     common_words = current_words.intersection(available_words)
                     if len(common_words) >= max(1, len(current_words) * 0.5):
                         matching_supplier_dir = available_supplier
-                        print(f"      🔍 Using word-based match: '{current_supplier}' -> '{available_supplier}' (common words: {common_words})")
+                        print(f"       Using word-based match: '{current_supplier}' -> '{available_supplier}' (common words: {common_words})")
                         break
             
             # Strategy 4: Remove common suffixes/prefixes and try again
@@ -1849,7 +1877,7 @@ class CrossReferenceEngine:
                         cleaned_current = cleaned_current[len(prefix):].strip()
                         break
                 
-                print(f"      🔧 Trying cleaned supplier name: '{cleaned_current}'")
+                print(f"       Trying cleaned supplier name: '{cleaned_current}'")
                 
                 for available_supplier in available_suppliers:
                     cleaned_available = available_supplier.lower()
@@ -1865,12 +1893,12 @@ class CrossReferenceEngine:
                     
                     if cleaned_current == cleaned_available:
                         matching_supplier_dir = available_supplier
-                        print(f"      ✅ Cleaned name match: '{current_supplier}' -> '{available_supplier}'")
+                        print(f"      [OK] Cleaned name match: '{current_supplier}' -> '{available_supplier}'")
                         break
             
             if not matching_supplier_dir:
-                print(f"      ❌ No matching supplier directory found for '{current_supplier}'")
-                print(f"      🔄 FALLBACK: Searching all PDF directories since no supplier match found")
+                print(f"      [ERROR] No matching supplier directory found for '{current_supplier}'")
+                print(f"      [LOOP] FALLBACK: Searching all PDF directories since no supplier match found")
                 
                 # Collect all PDF files for fallback search
                 all_pdf_files = []
@@ -1880,37 +1908,37 @@ class CrossReferenceEngine:
                     for pdf_file in pdf_files:
                         all_pdf_files.append((os.path.join(supplier_path, pdf_file), supplier_dir))
                 
-                print(f"      📂 FALLBACK: Will search {len(all_pdf_files)} PDF files across all directories")
+                print(f"      [DIR] FALLBACK: Will search {len(all_pdf_files)} PDF files across all directories")
                 
                 # Use high-performance processing for fallback with recovery
                 matches = self.process_pdfs_with_recovery(all_pdf_files, search_keywords, description, threshold)
-                print(f"      📊 Fallback search completed: {len(matches)} matches found")
+                print(f"      [CHART] Fallback search completed: {len(matches)} matches found")
                 return matches
             
-            print(f"      ✅ Found matching supplier directory: {matching_supplier_dir}")
+            print(f"      [OK] Found matching supplier directory: {matching_supplier_dir}")
             
             # Check if supplier directory exists
             supplier_path = os.path.join(pdf_dir, matching_supplier_dir)
             if not os.path.exists(supplier_path) or not os.path.isdir(supplier_path):
-                print(f"      ❌ Supplier directory not found or not a directory: {supplier_path}")
+                print(f"      [ERROR] Supplier directory not found or not a directory: {supplier_path}")
                 return matches
             
-            print(f"      📂 Using supplier directory: {supplier_path}")
+            print(f"      [DIR] Using supplier directory: {supplier_path}")
             
             # Get PDF files from this specific supplier directory only
             pdf_files = [f for f in os.listdir(supplier_path) if f.lower().endswith('.pdf')]
             print(f"      Found {len(pdf_files)} PDF files in supplier directory")
             
             if not pdf_files:
-                print(f"      ❌ No PDF files in supplier directory")
+                print(f"      [ERROR] No PDF files in supplier directory")
                 return matches
             
             # Apply smart PDF filtering to prioritize useful PDFs and filter out noise
-            print(f"      🎯 Applying smart PDF filtering...")
+            print(f"      [TARGET] Applying smart PDF filtering...")
             filtered_pdfs = self.pdf_filter.filter_and_prioritize_pdfs(pdf_files)
             
             if not filtered_pdfs:
-                print(f"      ❌ No PDFs passed smart filtering (all were noise)")
+                print(f"      [ERROR] No PDFs passed smart filtering (all were noise)")
                 return matches
             
             # Show filtering results
@@ -1918,7 +1946,7 @@ class CrossReferenceEngine:
             for _, category, _ in filtered_pdfs:
                 category_counts[category] = category_counts.get(category, 0) + 1
             
-            print(f"      📊 Smart filtering results:")
+            print(f"      [CHART] Smart filtering results:")
             print(f"        Original PDFs: {len(pdf_files)}")
             print(f"        After filtering: {len(filtered_pdfs)}")
             print(f"        Filtered out: {len(pdf_files) - len(filtered_pdfs)} PDFs ({((len(pdf_files) - len(filtered_pdfs)) / len(pdf_files) * 100):.1f}%)")
@@ -1935,8 +1963,8 @@ class CrossReferenceEngine:
             matches = self.process_pdfs_with_recovery(pdf_file_paths, search_keywords, description, threshold)
             
             total_time = time.time() - start_time
-            print(f"    ⏱️ Total processing time: {total_time:.1f}s")
-            print(f"    📊 Processed {len(filtered_pdf_files)} PDFs from supplier '{matching_supplier_dir}' (filtered from {len(pdf_files)} total)")
+            print(f"    [TIMER] Total processing time: {total_time:.1f}s")
+            print(f"    [CHART] Processed {len(filtered_pdf_files)} PDFs from supplier '{matching_supplier_dir}' (filtered from {len(pdf_files)} total)")
             print(f"    Total matches found: {len(matches)}")
             
             # Deduplicate matches by normalized filename
@@ -1944,12 +1972,12 @@ class CrossReferenceEngine:
                 original_count = len(matches)
                 matches = deduplicate_matches(matches)
                 if len(matches) < original_count:
-                    print(f"    🔄 Deduplication: {original_count} -> {len(matches)} matches")
+                    print(f"    [LOOP] Deduplication: {original_count} -> {len(matches)} matches")
             
             return matches
             
         except Exception as e:
-            print(f"    ❌ Error in find_matching_pdfs_high_performance: {e}")
+            print(f"    [ERROR] Error in find_matching_pdfs_high_performance: {e}")
             return matches
 
     def process_pdfs_parallel(self, pdf_file_paths, search_keywords, description, threshold, low_cpu_mode=False):
@@ -1962,7 +1990,7 @@ class CrossReferenceEngine:
         processed_count = 0
         total_pdfs = len(pdf_file_paths)
         
-        print(f"        📊 Processing {total_pdfs} PDFs for supplier")
+        print(f"        [CHART] Processing {total_pdfs} PDFs for supplier")
         
         # Use a single worker for stability
         max_workers = 1
@@ -1983,7 +2011,7 @@ class CrossReferenceEngine:
                     
                     # Check if we should stop
                     if hasattr(self, 'stop_analysis') and self.stop_analysis:
-                        print("        🛑 Analysis stopped by user")
+                        print("         Analysis stopped by user")
                         # Shutdown immediately without waiting
                         executor.shutdown(wait=False, cancel_futures=True)
                         return matches
@@ -1994,35 +2022,35 @@ class CrossReferenceEngine:
                         
                         if result:
                             matches.append(result)
-                            print(f"        ✅ MATCH! PDF {processed_count}/{total_pdfs}: {os.path.basename(result['pdf_path'])}")
+                            print(f"        [OK] MATCH! PDF {processed_count}/{total_pdfs}: {os.path.basename(result['pdf_path'])}")
                         else:
                             # Show progress every 10 PDFs or when complete
                             if processed_count % 10 == 0 or processed_count == total_pdfs:
-                                print(f"        📊 Progress: {processed_count}/{total_pdfs} PDFs processed")
+                                print(f"        [CHART] Progress: {processed_count}/{total_pdfs} PDFs processed")
                                 
                     except TimeoutError:
                         pdf_path, supplier_dir = future_to_args[future]
-                        print(f"        ⏰ TIMEOUT: PDF {processed_count}/{total_pdfs} - {os.path.basename(pdf_path)}")
+                        print(f"        [TIMEOUT] TIMEOUT: PDF {processed_count}/{total_pdfs} - {os.path.basename(pdf_path)}")
                         continue
                     except Exception as e:
-                        print(f"        ⚠️ Error in PDF {processed_count}/{total_pdfs}: {e}")
+                        print(f"        [WARNING] Error in PDF {processed_count}/{total_pdfs}: {e}")
                         continue
                 
                 # CRITICAL: Explicitly shutdown the executor when done
                 executor.shutdown(wait=False, cancel_futures=True)
-                print(f"        ✅ Completed processing {processed_count}/{total_pdfs} PDFs")
+                print(f"        [OK] Completed processing {processed_count}/{total_pdfs} PDFs")
                 
         except Exception as e:
-            print(f"        ❌ Parallel processing error: {e}")
+            print(f"        [ERROR] Parallel processing error: {e}")
             # Fallback to sequential processing
-            print("        🔄 Falling back to sequential processing...")
+            print("        [LOOP] Falling back to sequential processing...")
             return self.process_pdfs_sequential(pdf_file_paths, search_keywords, description, threshold)
         finally:
             # Force cleanup of any remaining processes
             try:
                 import gc
                 gc.collect()
-                print("        🧹 Force cleanup completed")
+                print("        [CLEAN] Force cleanup completed")
             except:
                 pass
         
@@ -2037,17 +2065,17 @@ class CrossReferenceEngine:
             if hasattr(self, 'stop_analysis') and self.stop_analysis:
                 break
                 
-            print(f"        🔄 Sequential processing: PDF {i}/{total_pdfs}")
-            
+            print(f"        [SEQ] Sequential processing: PDF {i}/{total_pdfs}")
+
             try:
                 result = process_single_pdf((pdf_path, search_keywords, description, threshold))
                 if result:
                     matches.append(result)
-                    print(f"        ✅ MATCH! PDF {i}/{total_pdfs}: {os.path.basename(result['pdf_path'])}")
-                    
+                    print(f"        [MATCH] PDF {i}/{total_pdfs}: {os.path.basename(result['pdf_path'])}")
+
                 # Progress update
                 if i % 10 == 0 or i == total_pdfs:
-                    print(f"        📊 Progress: {i}/{total_pdfs} PDFs processed")
+                    print(f"        [PROGRESS] {i}/{total_pdfs} PDFs processed")
                     
                 # Memory cleanup every 50 PDFs
                 if i % 50 == 0:
@@ -2055,7 +2083,7 @@ class CrossReferenceEngine:
                     gc.collect()
                     
             except Exception as e:
-                print(f"        ⚠️ Error in sequential processing PDF {i}: {e}")
+                print(f"        [WARNING] Error in sequential processing PDF {i}: {e}")
                 continue
                 
         return matches
@@ -2070,20 +2098,20 @@ class CrossReferenceEngine:
         if hasattr(self, 'test_mode') and self.test_mode:
             pdf_file_paths = pdf_file_paths[:100]
             total_pdfs = len(pdf_file_paths)
-            print(f"        🧪 TEST MODE: Processing only first {total_pdfs} PDFs")
+            print(f"        [TEST] TEST MODE: Processing only first {total_pdfs} PDFs")
         else:
-            print(f"        📊 Processing all {total_pdfs} PDFs")
+            print(f"        [CHART] Processing all {total_pdfs} PDFs")
         
         import time
         overall_start_time = time.time()
         max_total_time = 7200  # 2 hours maximum total time (for large datasets)
         
-        print(f"        ⏰ REASONABLE TIMEOUT: {max_total_time/60:.1f} minutes maximum")
+        print(f"        [TIMEOUT] REASONABLE TIMEOUT: {max_total_time/60:.1f} minutes maximum")
         
         for batch_start in range(0, total_pdfs, batch_size):
             # Check overall timeout
             if time.time() - overall_start_time > max_total_time:
-                print(f"        ⏰ OVERALL TIMEOUT: Exceeded {max_total_time/60:.1f} minutes total time, stopping")
+                print(f"        [TIMEOUT] OVERALL TIMEOUT: Exceeded {max_total_time/60:.1f} minutes total time, stopping")
                 break
                 
             batch_end = min(batch_start + batch_size, total_pdfs)
@@ -2093,13 +2121,17 @@ class CrossReferenceEngine:
             
             # Process batch with timeout
             batch_start_time = time.time()
-            batch_matches = self.process_pdfs_parallel(batch_files, search_keywords, description, threshold)
+            # Use sequential processing if configured (avoids multiprocessing pickling issues)
+            if hasattr(self, 'low_cpu_mode') and self.low_cpu_mode:
+                batch_matches = self.process_pdfs_sequential(batch_files, search_keywords, description, threshold)
+            else:
+                batch_matches = self.process_pdfs_parallel(batch_files, search_keywords, description, threshold)
             
             # Check if batch took too long
             batch_time = time.time() - batch_start_time
             if batch_time > 600:  # 10 minutes per batch max (reasonable for large batches)
-                print(f"        ⏰ Batch took {batch_time:.1f}s, this batch is taking too long")
-                print(f"        ⚠️ Continuing with next batch...")
+                print(f"        [TIMEOUT] Batch took {batch_time:.1f}s, this batch is taking too long")
+                print(f"        [WARNING] Continuing with next batch...")
                 continue
             
             matches.extend(batch_matches)
@@ -2107,7 +2139,7 @@ class CrossReferenceEngine:
             # Force cleanup after each batch
             import gc
             gc.collect()
-            print(f"        🧹 Batch completed, memory cleaned")
+            print(f"        [CLEAN] Batch completed, memory cleaned")
         
         return matches
 
@@ -2163,27 +2195,27 @@ class CrossReferenceEngine:
         return text
 
     def _extract_pdf_text_uncached(self, pdf_path, timeout_seconds=30):
-        """Internal PDF extraction — use extract_pdf_text() which adds caching."""
+        """Internal PDF extraction - use extract_pdf_text() which adds caching."""
         try:
             # Check if file exists and is readable
             if not os.path.exists(pdf_path):
-                print(f"    ❌ File not found: {os.path.basename(pdf_path)}")
+                print(f"    [ERROR] File not found: {os.path.basename(pdf_path)}")
                 return ""
             
             # Check file size - skip very large files that might be corrupted
             file_size = os.path.getsize(pdf_path)
             if file_size > 50 * 1024 * 1024:  # Reduced from 100MB to 50MB limit
-                print(f"    ⚠️ Skipping large file ({file_size/1024/1024:.1f}MB): {os.path.basename(pdf_path)}")
+                print(f"    [WARNING] Skipping large file ({file_size/1024/1024:.1f}MB): {os.path.basename(pdf_path)}")
                 return ""
             
             if file_size == 0:
-                print(f"    ❌ Empty file: {os.path.basename(pdf_path)}")
+                print(f"    [ERROR] Empty file: {os.path.basename(pdf_path)}")
                 return ""
             
             # Additional checks for problematic files
             filename = os.path.basename(pdf_path).lower()
             if any(skip_word in filename for skip_word in ['novaseq', 'concordance', 'app-note']):
-                print(f"    ⚠️ Skipping potentially problematic file: {os.path.basename(pdf_path)}")
+                print(f"    [WARNING] Skipping potentially problematic file: {os.path.basename(pdf_path)}")
                 return ""
             
             # Suppress PDF library warnings and cache messages
@@ -2204,14 +2236,14 @@ class CrossReferenceEngine:
                         
                         # Check if PDF is encrypted
                         if reader.is_encrypted:
-                            print(f"    🔒 Encrypted PDF (skipping): {os.path.basename(pdf_path)}")
+                            print(f"    [LOCK] Encrypted PDF (skipping): {os.path.basename(pdf_path)}")
                             return ""
                         
                         # Limit pages to prevent hanging on large files
                         max_pages = 20  # Reduced from 50
                         total_pages = len(reader.pages)
                         if total_pages > max_pages:
-                            print(f"    ⚠️ Large PDF ({total_pages} pages), limiting to first {max_pages} pages: {os.path.basename(pdf_path)}")
+                            print(f"    [WARNING] Large PDF ({total_pages} pages), limiting to first {max_pages} pages: {os.path.basename(pdf_path)}")
                         
                         text = ""
                         pages_to_process = min(total_pages, max_pages)
@@ -2225,11 +2257,11 @@ class CrossReferenceEngine:
                                     
                                     # Limit text length to prevent memory issues
                                     if len(text) > 20000:  # Reduced from 50000 to 20KB
-                                        print(f"    ⚠️ Text limit reached, stopping extraction: {os.path.basename(pdf_path)}")
+                                        print(f"    [WARNING] Text limit reached, stopping extraction: {os.path.basename(pdf_path)}")
                                         break
                                         
                             except Exception as e:
-                                print(f"    ⚠️ Error on page {page_num + 1}: {e}")
+                                print(f"    [WARNING] Error on page {page_num + 1}: {e}")
                                 continue
                     
                     if text.strip():
@@ -2278,22 +2310,22 @@ class CrossReferenceEngine:
                                         
                                         # Limit text length to prevent memory issues
                                         if len(text) > 20000:  # Reduced from 50000 to 20KB
-                                            print(f"    ⚠️ Text limit reached, stopping extraction: {os.path.basename(pdf_path)}")
+                                            print(f"    [WARNING] Text limit reached, stopping extraction: {os.path.basename(pdf_path)}")
                                             break
                                             
                                 except Exception as e:
-                                    print(f"    ⚠️ Error on page {page_num + 1} (pdfplumber): {e}")
+                                    print(f"    [WARNING] Error on page {page_num + 1} (pdfplumber): {e}")
                                     continue
                         
                         if text.strip():
                             return text.strip()
                     except Exception as e:
-                        print(f"    ⚠️ pdfplumber failed: {e}")
+                        print(f"    [WARNING] pdfplumber failed: {e}")
                     
                     return ""
                     
                 except Exception as e:
-                    print(f"    ❌ Error extracting text from {os.path.basename(pdf_path)}: {e}")
+                    print(f"    [ERROR] Error extracting text from {os.path.basename(pdf_path)}: {e}")
                     return ""
             else:
                 # Unix/Linux systems can use SIGALRM
@@ -2309,14 +2341,14 @@ class CrossReferenceEngine:
                             
                             # Check if PDF is encrypted
                             if reader.is_encrypted:
-                                print(f"    🔒 Encrypted PDF (skipping): {os.path.basename(pdf_path)}")
+                                print(f"    [LOCK] Encrypted PDF (skipping): {os.path.basename(pdf_path)}")
                                 return ""
                             
                             # Limit pages to prevent hanging on large files
                             max_pages = 20  # Reduced from 50
                             total_pages = len(reader.pages)
                             if total_pages > max_pages:
-                                print(f"    ⚠️ Large PDF ({total_pages} pages), limiting to first {max_pages} pages: {os.path.basename(pdf_path)}")
+                                print(f"    [WARNING] Large PDF ({total_pages} pages), limiting to first {max_pages} pages: {os.path.basename(pdf_path)}")
                             
                             text = ""
                             pages_to_process = min(total_pages, max_pages)
@@ -2330,11 +2362,11 @@ class CrossReferenceEngine:
                                         
                                         # Limit text length to prevent memory issues
                                         if len(text) > 20000:  # Reduced from 50000 to 20KB
-                                            print(f"    ⚠️ Text limit reached, stopping extraction: {os.path.basename(pdf_path)}")
+                                            print(f"    [WARNING] Text limit reached, stopping extraction: {os.path.basename(pdf_path)}")
                                             break
                                             
                                 except Exception as e:
-                                    print(f"    ⚠️ Error on page {page_num + 1}: {e}")
+                                    print(f"    [WARNING] Error on page {page_num + 1}: {e}")
                                     continue
                         
                         if text.strip():
@@ -2383,17 +2415,17 @@ class CrossReferenceEngine:
                                             
                                             # Limit text length to prevent memory issues
                                             if len(text) > 20000:  # Reduced from 50000 to 20KB
-                                                print(f"    ⚠️ Text limit reached, stopping extraction: {os.path.basename(pdf_path)}")
+                                                print(f"    [WARNING] Text limit reached, stopping extraction: {os.path.basename(pdf_path)}")
                                                 break
                                                 
                                     except Exception as e:
-                                        print(f"    ⚠️ Error on page {page_num + 1} (pdfplumber): {e}")
+                                        print(f"    [WARNING] Error on page {page_num + 1} (pdfplumber): {e}")
                                         continue
                                 
                                 if text.strip():
                                     return text.strip()
                         except Exception as e:
-                            print(f"    ⚠️ pdfplumber failed: {e}")
+                            print(f"    [WARNING] pdfplumber failed: {e}")
                         
                         return ""
                         
@@ -2401,20 +2433,20 @@ class CrossReferenceEngine:
                         # Restore original signal handler and cancel alarm
                         signal.alarm(0)
                         signal.signal(signal.SIGALRM, original_handler)
-                
-                except TimeoutError:
-                    print(f"    ⏰ Timeout processing PDF: {os.path.basename(pdf_path)}")
+
+                except TimeoutException:
+                    print(f"    [TIMEOUT] Timeout processing PDF: {os.path.basename(pdf_path)}")
                     return ""
                 except Exception as e:
-                    print(f"    ❌ Error extracting text from {os.path.basename(pdf_path)}: {e}")
+                    print(f"    [ERROR] Error extracting text from {os.path.basename(pdf_path)}: {e}")
                     return ""
         
         except Exception as e:
-            print(f"    ❌ Error extracting text from {os.path.basename(pdf_path)}: {e}")
+            print(f"    [ERROR] Error extracting text from {os.path.basename(pdf_path)}: {e}")
             return ""
         
         # If we get here, no text was extracted
-        print(f"    ⚠️ No text could be extracted from {os.path.basename(pdf_path)}")
+        print(f"    [WARNING] No text could be extracted from {os.path.basename(pdf_path)}")
         return ""
 
     def calculate_match_score(self, keywords, pdf_text, description, threshold=30):
@@ -2457,7 +2489,7 @@ class CrossReferenceEngine:
 
     def cleanup_processes(self):
         """Enhanced process cleanup to prevent hanging."""
-        print("🧹 Cleaning up processes...")
+        print("[CLEAN] Cleaning up processes...")
         
         if hasattr(self, 'parent_gui_processes'):
             for process in self.parent_gui_processes[:]:  # Iterate over copy
@@ -2469,7 +2501,7 @@ class CrossReferenceEngine:
                             process.kill()
                             process.join(timeout=0.5)
                 except Exception as e:
-                    print(f"⚠️ Error cleaning up process: {e}")
+                    print(f"[WARNING] Error cleaning up process: {e}")
                 finally:
                     # Remove from list regardless of outcome
                     if process in self.parent_gui_processes:
@@ -2491,12 +2523,12 @@ class CrossReferenceEngine:
                         except:
                             pass
             except Exception as e:
-                print(f"⚠️ System cleanup warning: {e}")
+                print(f"[WARNING] System cleanup warning: {e}")
         
         # Force garbage collection
         import gc
         gc.collect()
-        print("✅ Process cleanup completed")
+        print("[OK] Process cleanup completed")
 
     def export_results(self, output_file=None):
         """Export cross-reference results to Excel with clean format."""
@@ -2515,7 +2547,7 @@ class CrossReferenceEngine:
                 
                 # Create clean result entry
                 export_data.append({
-                    'Match Result': f"✅ MATCH! PDF {i}/{total_pdfs}: {pdf_filename} (Score: {result['Match Score']:.1f}%)",
+                    'Match Result': f"[OK] MATCH! PDF {i}/{total_pdfs}: {pdf_filename} (Score: {result['Match Score']:.1f}%)",
                     'Item Code': result['Item Code'],
                     'Description': result['Description'],
                     'Category': result['Category'],
@@ -2585,7 +2617,7 @@ def main():
                 import gc
                 gc.collect()
                 
-                print("🛑 All processes terminated due to window close")
+                print(" All processes terminated due to window close")
             
             # Force terminate any remaining processes using psutil if available
             try:
@@ -2718,13 +2750,13 @@ def main():
                 status_label.config(text="Processing suppliers...", fg="blue")
             elif "Analyzing PDF" in message:
                 status_label.config(text="Analyzing PDFs...", fg="blue")
-            elif "✅ MATCH!" in message:
+            elif "[OK] MATCH!" in message:
                 status_label.config(text="Found matches!", fg="green")
-            elif "❌ Error" in message:
+            elif "[ERROR] Error" in message:
                 status_label.config(text="Error occurred", fg="red")
             elif "=== CROSS-REFERENCE ANALYSIS COMPLETE ===" in message:
                 status_label.config(text="Analysis completed!", fg="green")
-            elif "🛑 Analysis stopped" in message:
+            elif " Analysis stopped" in message:
                 status_label.config(text="Analysis stopped", fg="orange")
             
             # Force GUI update more frequently
@@ -2735,27 +2767,27 @@ def main():
         def run_analysis_thread(input_file, master_file, pdf_dir, threshold, test_mode, high_performance, low_cpu_mode, clean_output):
             nonlocal analysis_running, stop_analysis, current_processes
             try:
-                gui_print("🔧 Analysis thread started")
+                gui_print(" Analysis thread started")
                 
                 # Override print function
                 import builtins
                 original_print = builtins.print
                 builtins.print = gui_print
                 
-                gui_print("🔧 Creating CrossReferenceEngine...")
+                gui_print(" Creating CrossReferenceEngine...")
                 # Run analysis
                 engine = CrossReferenceEngine()
                 # Pass the stop_analysis attribute to the engine
                 engine.stop_analysis = stop_analysis
                 # Pass the process tracking list
                 engine.parent_gui_processes = current_processes
-                gui_print("🔧 Starting cross-reference analysis...")
+                gui_print(" Starting cross-reference analysis...")
                 
                 if high_performance:
-                    gui_print("🚀 HIGH PERFORMANCE MODE ENABLED - Using parallel processing")
+                    gui_print("[ROCKET] HIGH PERFORMANCE MODE ENABLED - Using parallel processing")
                     success = engine.run_cross_reference_high_performance(input_file, master_file, pdf_dir, threshold, test_mode, low_cpu_mode, clean_output)
                 else:
-                    gui_print("🐌 STANDARD MODE - Using sequential processing")
+                    gui_print(" STANDARD MODE - Using sequential processing")
                     success = engine.run_cross_reference(input_file, master_file, pdf_dir, threshold, test_mode, clean_output)
                 
                 if not stop_analysis:
@@ -2769,13 +2801,13 @@ def main():
                     else:
                         messagebox.showerror("Error", "Cross-reference analysis failed.")
                 else:
-                    gui_print("🛑 Analysis was stopped by user")
+                    gui_print(" Analysis was stopped by user")
                 
                 # Restore original print function
                 builtins.print = original_print
                 
             except Exception as e:
-                gui_print(f"❌ Error: {e}")
+                gui_print(f"[ERROR] Error: {e}")
                 if not stop_analysis:
                     messagebox.showerror("Error", f"Analysis failed: {e}")
             finally:
@@ -2820,7 +2852,7 @@ def main():
             progress_bar.stop()
             run_button.config(state='normal')
             stop_button.config(state='disabled')
-            gui_print("🛑 Analysis stopped by user")
+            gui_print(" Analysis stopped by user")
         
         # Run button
         def run_analysis():
@@ -2866,7 +2898,7 @@ def main():
             
             # Check if files exist
             if not os.path.exists(input_file):
-                gui_print(f"❌ Input file not found: {input_file}")
+                gui_print(f"[ERROR] Input file not found: {input_file}")
                 progress_bar.stop()
                 status_label.config(text="Ready", fg="black")
                 analysis_running = False
@@ -2874,10 +2906,10 @@ def main():
                 stop_button.config(state='disabled')
                 return
             else:
-                gui_print(f"✅ Input file exists: {os.path.getsize(input_file)} bytes")
+                gui_print(f"[OK] Input file exists: {os.path.getsize(input_file)} bytes")
             
             if not os.path.exists(master_file):
-                gui_print(f"❌ Master file not found: {master_file}")
+                gui_print(f"[ERROR] Master file not found: {master_file}")
                 progress_bar.stop()
                 status_label.config(text="Ready", fg="black")
                 analysis_running = False
@@ -2885,10 +2917,10 @@ def main():
                 stop_button.config(state='disabled')
                 return
             else:
-                gui_print(f"✅ Master file exists: {os.path.getsize(master_file)} bytes")
+                gui_print(f"[OK] Master file exists: {os.path.getsize(master_file)} bytes")
             
             if not os.path.exists(pdf_dir):
-                gui_print(f"❌ PDF directory not found: {pdf_dir}")
+                gui_print(f"[ERROR] PDF directory not found: {pdf_dir}")
                 progress_bar.stop()
                 status_label.config(text="Ready", fg="black")
                 analysis_running = False
@@ -2896,32 +2928,32 @@ def main():
                 stop_button.config(state='disabled')
                 return
             else:
-                gui_print(f"✅ PDF directory exists")
+                gui_print(f"[OK] PDF directory exists")
                 
                 # Check PDF directory contents
                 try:
                     pdf_contents = os.listdir(pdf_dir)
-                    gui_print(f"📁 PDF directory contains: {pdf_contents}")
+                    gui_print(f"[FILE] PDF directory contains: {pdf_contents}")
                     
                     # Count PDF files
                     pdf_files = [f for f in pdf_contents if f.lower().endswith('.pdf')]
-                    gui_print(f"📄 Found {len(pdf_files)} PDF files directly in directory")
+                    gui_print(f"[FILE] Found {len(pdf_files)} PDF files directly in directory")
                     
                     # Check for supplier folders
                     supplier_folders = [d for d in pdf_contents if os.path.isdir(os.path.join(pdf_dir, d))]
-                    gui_print(f"📂 Found {len(supplier_folders)} supplier folders: {supplier_folders}")
+                    gui_print(f"[DIR] Found {len(supplier_folders)} supplier folders: {supplier_folders}")
                     
                     if not supplier_folders:
-                        gui_print("⚠️ No supplier folders found! Expected structure:")
+                        gui_print("[WARNING] No supplier folders found! Expected structure:")
                         gui_print("  PDFs/")
-                        gui_print("  ├── Supplier1/")
-                        gui_print("  │   ├── document1.pdf")
-                        gui_print("  │   └── document2.pdf")
-                        gui_print("  └── Supplier2/")
-                        gui_print("      └── document3.pdf")
+                        gui_print("   Supplier1/")
+                        gui_print("      document1.pdf")
+                        gui_print("      document2.pdf")
+                        gui_print("   Supplier2/")
+                        gui_print("       document3.pdf")
                         gui_print("")
-                        gui_print("💡 TIP: Create supplier folders in your PDF directory")
-                        gui_print("💡 TIP: Place PDF files inside supplier-named folders")
+                        gui_print(" TIP: Create supplier folders in your PDF directory")
+                        gui_print(" TIP: Place PDF files inside supplier-named folders")
                         progress_bar.stop()
                         status_label.config(text="Ready", fg="black")
                         analysis_running = False
@@ -2934,14 +2966,14 @@ def main():
                     for folder in supplier_folders:
                         folder_path = os.path.join(pdf_dir, folder)
                         folder_pdfs = [f for f in os.listdir(folder_path) if f.lower().endswith('.pdf')]
-                        gui_print(f"  📂 {folder}: {len(folder_pdfs)} PDF files")
+                        gui_print(f"  [DIR] {folder}: {len(folder_pdfs)} PDF files")
                         total_pdfs += len(folder_pdfs)
                     
-                    gui_print(f"📊 Total PDFs found: {total_pdfs}")
+                    gui_print(f"[CHART] Total PDFs found: {total_pdfs}")
                     
                     if total_pdfs == 0:
-                        gui_print("❌ No PDF files found in supplier folders!")
-                        gui_print("💡 TIP: Add PDF files to your supplier folders")
+                        gui_print("[ERROR] No PDF files found in supplier folders!")
+                        gui_print(" TIP: Add PDF files to your supplier folders")
                         progress_bar.stop()
                         status_label.config(text="Ready", fg="black")
                         analysis_running = False
@@ -2949,8 +2981,8 @@ def main():
                         stop_button.config(state='disabled')
                         return
                     
-                    gui_print("✅ PDF directory validation completed successfully!")
-                    gui_print("🚀 Starting cross-reference analysis...")
+                    gui_print("[OK] PDF directory validation completed successfully!")
+                    gui_print("[ROCKET] Starting cross-reference analysis...")
                     
                     # Start the analysis thread
                     low_cpu_mode = low_cpu_var.get()
@@ -2959,7 +2991,7 @@ def main():
                     thread.start()
                         
                 except Exception as e:
-                    gui_print(f"❌ Error reading PDF directory: {e}")
+                    gui_print(f"[ERROR] Error reading PDF directory: {e}")
                     progress_bar.stop()
                     status_label.config(text="Ready", fg="black")
                     analysis_running = False
@@ -3011,7 +3043,7 @@ def main():
             try:
                 # Clear output area
                 output_text.delete(1.0, tk.END)
-                gui_print("🧪 Creating test data...")
+                gui_print("[TEST] Creating test data...")
                 
                 # Create test input file
                 test_input_data = {
@@ -3023,7 +3055,7 @@ def main():
                 test_input_df = pd.DataFrame(test_input_data)
                 test_input_file = "test_input.xlsx"
                 test_input_df.to_excel(test_input_file, index=False)
-                gui_print(f"✅ Created test input file: {test_input_file}")
+                gui_print(f"[OK] Created test input file: {test_input_file}")
                 
                 # Create test master file
                 test_master_data = {
@@ -3034,7 +3066,7 @@ def main():
                 test_master_df = pd.DataFrame(test_master_data)
                 test_master_file = "test_master.xlsx"
                 test_master_df.to_excel(test_master_file, index=False)
-                gui_print(f"✅ Created test master file: {test_master_file}")
+                gui_print(f"[OK] Created test master file: {test_master_file}")
                 
                 # Create test PDF directory structure
                 test_pdf_dir = "test_pdfs"
@@ -3065,19 +3097,19 @@ def main():
                         f.write("Contains product information and specifications.\n")
                         f.write("Test Product 1 electronics equipment tools.\n")
                         f.write("Test Product 2 tools equipment electronics.\n")
-                    gui_print(f"✅ Created test PDF: {filepath}")
+                    gui_print(f"[OK] Created test PDF: {filepath}")
                 
                 # Set the file paths in the GUI
                 input_file_var.set(os.path.abspath(test_input_file))
                 master_file_var.set(os.path.abspath(test_master_file))
                 pdf_dir_var.set(os.path.abspath(test_pdf_dir))
                 
-                gui_print("✅ Test data created successfully!")
-                gui_print("💡 You can now click 'Run Cross-Reference Analysis' to test the app")
-                gui_print("💡 The test will process 3 items against 4 PDF files")
+                gui_print("[OK] Test data created successfully!")
+                gui_print(" You can now click 'Run Cross-Reference Analysis' to test the app")
+                gui_print(" The test will process 3 items against 4 PDF files")
                 
             except Exception as e:
-                gui_print(f"❌ Error creating test data: {e}")
+                gui_print(f"[ERROR] Error creating test data: {e}")
         
         test_button = tk.Button(button_frame, text="Create Test Data", command=create_test_data,
                                bg="orange", fg="white", font=("Arial", 12, "bold"))
@@ -3123,13 +3155,13 @@ if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        print("\n🛑 Interrupted by user (Ctrl+C)")
+        print("\n Interrupted by user (Ctrl+C)")
         sys.exit(0)
     except SystemExit:
-        print("🛑 Application terminated")
+        print(" Application terminated")
         sys.exit(0)
     except Exception as e:
-        print(f"❌ Unexpected error: {e}")
+        print(f"[ERROR] Unexpected error: {e}")
         sys.exit(1)
     finally:
         # Final cleanup - kill any remaining child processes

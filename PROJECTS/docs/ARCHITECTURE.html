@@ -1,0 +1,805 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Crawler — System Architecture, Data Flow &amp; Security</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  * { margin: 0; }
+  img, svg { display: block; max-width: 100%; }
+  :root {
+    --ink:        #14171A;
+    --ink-soft:   #3A403C;
+    --muted:      #697065;
+    --rule:       #C9CCC2;
+    --paper:      #E7E9E3;
+    --surface:    #F2F3EF;
+    --panel:      #FBFBF8;
+    --accent:     #0E6A60;
+    --accent-dim: #0E6A6018;
+    --signal:     #A54428;
+    --signal-dim: #A5442814;
+    --off:        #8A8F84;
+
+    --f-display: Georgia, "Iowan Old Style", "Palatino Linotype", Palatino, serif;
+    --f-body: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+    --f-mono: "Cascadia Mono", Consolas, "SF Mono", ui-monospace, "DejaVu Sans Mono", monospace;
+
+    --measure: 68ch;
+    --s1: .35rem; --s2: .7rem; --s3: 1.15rem; --s4: 1.9rem; --s5: 3rem; --s6: 4.5rem;
+  }
+
+  /* Single-theme by design: the mermaid diagrams carry a pinned light palette,
+     so the page commits to light in every viewer theme rather than half-flipping. */
+
+  html, body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--f-body);
+    font-size: 16px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: var(--s5) var(--s3) var(--s6);
+    display: flex;
+    flex-direction: column;
+    gap: var(--s5);
+  }
+  .col { max-width: var(--measure); }
+
+  h1, h2, h3 { font-family: var(--f-display); font-weight: 600; text-wrap: balance; line-height: 1.18; }
+  h1 { font-size: clamp(2.1rem, 5vw, 3.1rem); letter-spacing: -.015em; }
+  h2 { font-size: clamp(1.5rem, 3vw, 1.95rem); letter-spacing: -.01em; }
+  h3 { font-size: 1.12rem; letter-spacing: -.005em; }
+  p { max-width: var(--measure); }
+  a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  a:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 2px; }
+
+  code, .mono { font-family: var(--f-mono); font-size: .86em; }
+  code { background: var(--accent-dim); padding: .1em .32em; border-radius: 2px; word-break: break-word; }
+
+  .eyebrow {
+    font-family: var(--f-mono);
+    font-size: .7rem;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  /* ---- masthead ---- */
+  .masthead { display: flex; flex-direction: column; gap: var(--s3); }
+  .masthead p.lede { font-size: 1.13rem; color: var(--ink-soft); }
+  .rule-heavy { height: 3px; background: var(--accent); width: 100%; }
+
+  /* ---- funnel strip ---- */
+  .funnel {
+    display: flex; flex-wrap: wrap; gap: 0;
+    border: 1px solid var(--rule); background: var(--surface);
+  }
+  .funnel div {
+    flex: 1 1 130px; padding: var(--s3) var(--s3) var(--s3) var(--s3);
+    border-right: 1px solid var(--rule);
+    display: flex; flex-direction: column; gap: var(--s1);
+  }
+  .funnel div:last-child { border-right: 0; }
+  .funnel b {
+    font-family: var(--f-mono); font-variant-numeric: tabular-nums;
+    font-size: 1.5rem; font-weight: 600; line-height: 1; color: var(--ink);
+  }
+  .funnel div:last-child b { color: var(--accent); }
+  .funnel span { font-size: .78rem; color: var(--muted); line-height: 1.35; }
+
+  /* ---- sections ---- */
+  section { display: flex; flex-direction: column; gap: var(--s3); }
+  .sec-head { display: flex; flex-direction: column; gap: var(--s1); border-top: 1px solid var(--rule); padding-top: var(--s3); }
+
+  /* ---- stage blocks: numbered because run order is an enforced invariant ---- */
+  .stage {
+    display: grid; grid-template-columns: 3.4rem 1fr; gap: 0 var(--s3);
+    border-left: 1px solid var(--rule); padding-left: 0;
+  }
+  .stage-num {
+    font-family: var(--f-mono); font-size: 1.55rem; font-weight: 600;
+    color: var(--accent); line-height: 1; padding-top: .18rem;
+    font-variant-numeric: tabular-nums;
+    border-left: 3px solid var(--accent); padding-left: var(--s2);
+    margin-left: -1px;
+  }
+  .stage.is-off .stage-num { color: var(--off); border-left-color: var(--off); }
+  .stage-body { display: flex; flex-direction: column; gap: var(--s2); min-width: 0; }
+  .stage + .stage { margin-top: var(--s4); }
+
+  .tag {
+    display: inline-block; font-family: var(--f-mono); font-size: .68rem;
+    letter-spacing: .1em; text-transform: uppercase;
+    padding: .2em .55em; border: 1px solid currentColor; border-radius: 2px;
+    vertical-align: .18em; margin-left: .5rem;
+  }
+  .tag.off { color: var(--off); }
+  .tag.gate { color: var(--signal); background: var(--signal-dim); }
+
+  /* ---- diagram panels ---- */
+  .diagram {
+    background: var(--panel);
+    border: 1px solid var(--rule);
+    padding: var(--s3);
+    overflow-x: auto;
+  }
+  .diagram pre.mermaid { min-width: min-content; }
+
+  /* Mermaid draws node labels as HTML inside foreignObject, so their colour comes
+     from the surrounding stylesheet rather than from themeVariables. The diagram
+     panels are pinned light, so pin the label ink to match. */
+  .diagram svg { background: transparent; }
+  .diagram .nodeLabel, .diagram .nodeLabel *,
+  .diagram .cluster-label, .diagram .cluster-label *,
+  .diagram .edgeLabel, .diagram .edgeLabel *,
+  .diagram .label, .diagram .label *,
+  .diagram foreignObject div, .diagram foreignObject span, .diagram foreignObject p {
+    color: #14171A !important;
+    fill: #14171A !important;
+  }
+  .diagram svg text, .diagram svg tspan { fill: #14171A !important; }
+  .diagram .edgeLabel rect, .diagram .labelBkg, .diagram .edgeLabel .background {
+    fill: #FBFBF8 !important;
+    background-color: #FBFBF8 !important;
+    opacity: 1 !important;
+  }
+  /* Arrowheads and connectors, in case the host greys them out too. */
+  .diagram .flowchart-link, .diagram .edgePath .path { stroke: #6B7268 !important; }
+  .diagram marker path, .diagram .arrowheadPath { fill: #6B7268 !important; stroke: #6B7268 !important; }
+  .diagram figcaption {
+    font-family: var(--f-mono); font-size: .72rem; color: #5F6659;
+    padding-top: var(--s2); margin-top: var(--s2); border-top: 1px solid #DDDED6;
+  }
+
+  /* ---- tables ---- */
+  .tablewrap { overflow-x: auto; border: 1px solid var(--rule); }
+  table { border-collapse: collapse; width: 100%; font-size: .88rem; background: var(--surface); }
+  th, td { text-align: left; padding: .55rem .75rem; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th {
+    font-family: var(--f-mono); font-size: .68rem; letter-spacing: .1em;
+    text-transform: uppercase; color: var(--muted); font-weight: 600;
+    background: var(--paper); white-space: nowrap;
+  }
+  tr:last-child td { border-bottom: 0; }
+  td.mono, td .path { font-family: var(--f-mono); font-size: .82rem; word-break: break-all; }
+  td.num { font-variant-numeric: tabular-nums; font-family: var(--f-mono); white-space: nowrap; }
+
+  /* ---- io list ---- */
+  .io { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s4); font-size: .85rem; }
+  .io div { display: flex; flex-direction: column; gap: .1rem; }
+  .io dt { font-family: var(--f-mono); font-size: .67rem; letter-spacing: .11em; text-transform: uppercase; color: var(--muted); }
+  .io dd { font-family: var(--f-mono); font-size: .82rem; word-break: break-all; }
+
+  /* ---- gap callouts: rust is spent only here and on security controls ---- */
+  .gap {
+    border-left: 3px solid var(--signal);
+    background: var(--signal-dim);
+    padding: var(--s2) var(--s3);
+    display: flex; flex-direction: column; gap: var(--s1);
+  }
+  .gap h3 { font-family: var(--f-body); font-size: .95rem; font-weight: 600; color: var(--signal); }
+  .gap p { font-size: .9rem; margin: 0; }
+  .gaps { display: flex; flex-direction: column; gap: var(--s2); }
+
+  .note { font-size: .88rem; color: var(--muted); border-left: 1px solid var(--rule); padding-left: var(--s3); }
+
+  ul.tight { padding-left: 1.1rem; display: flex; flex-direction: column; gap: .28rem; max-width: var(--measure); }
+  ul.tight li::marker { color: var(--accent); }
+
+  @media (prefers-reduced-motion: no-preference) {
+    a { transition: color .15s ease; }
+  }
+  /* Hold the light ground even when the host page is in dark theme. */
+  @media (prefers-color-scheme: dark) {
+    html, body { background: var(--paper); color: var(--ink); }
+  }
+  @media (max-width: 640px) {
+    .stage { grid-template-columns: 2.2rem 1fr; gap: 0 var(--s2); }
+    .stage-num { font-size: 1.1rem; }
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <div class="rule-heavy"></div>
+    <span class="eyebrow">Crawler · C:\projects\Crawler\PROJECTS · branch cleanup/ponytail-audit</span>
+    <h1>A sieve, not a spider.</h1>
+    <p class="lede">Crawler turns raw purchase requisitions into a short, defensible list of vendor documents. Five stages, one crawl engine, and roughly a dozen gates whose only job is to throw things away. This is the map: what the parts are, how data moves between them, and where the guardrails sit.</p>
+    <div class="funnel">
+      <div><b>17,201</b><span>requisition rows read from input</span></div>
+      <div><b>4,271</b><span>rows classified Instrument or Software</span></div>
+      <div><b>1,682</b><span>keyword tokens surviving pruning</span></div>
+      <div><b>903</b><span>vendor pages crawled</span></div>
+      <div><b>31</b><span>PDFs kept</span></div>
+    </div>
+    <p class="note">Figures from the validated end-to-end run of 2026-07-14. Each column is the input to the next, so the strip reads as the actual reduction ratio: about one PDF per 550 requisition rows.</p>
+  </header>
+
+  <!-- ============ SYSTEM MAP ============ -->
+  <section>
+    <div class="sec-head">
+      <span class="eyebrow">01 — Components</span>
+      <h2>The system map</h2>
+    </div>
+    <p>One orchestrator, five stage services, two operator surfaces, and a single crawl engine that every download path must route through. The engine is deliberately the only door: the pipeline, the Tkinter GUI, and <code>pdf_discovery_pipeline.py</code> all call the same object.</p>
+
+    <figure class="diagram">
+<pre class="mermaid">
+%%{init: {'theme':'base','themeVariables':{'primaryColor':'#F7F8F4','primaryTextColor':'#14171A','primaryBorderColor':'#6B7268','secondaryColor':'#F7F8F4','tertiaryColor':'#F1F2ED','background':'#FBFBF8','mainBkg':'#F7F8F4','lineColor':'#6B7268','textColor':'#14171A','fontFamily':'Consolas, monospace','fontSize':'13px','clusterBkg':'#F1F2ED','clusterBorder':'#C9CCC2','titleColor':'#14171A','edgeLabelBackground':'#FBFBF8','nodeTextColor':'#14171A'}}}%%
+flowchart TB
+  subgraph OPS["Operator surfaces"]
+    direction LR
+    GUI["Tkinter desktop app<br/>pdf_crawler_gui_2.py<br/>PDFCrawlerEnhancedApp"]
+    DASH["Flask dashboard<br/>ops/dashboard.py<br/>0.0.0.0:443 HTTPS"]
+    WATCH["Folder watchers<br/>watch_input.py<br/>ops/folder_monitor_service.py"]
+  end
+
+  ORCH["pipeline.py<br/>orchestrator · stage toggles<br/>reads pipeline_config.json"]
+
+  subgraph STAGES["Stage services · src/services/"]
+    direction TB
+    S0["0 · data_cleaner<br/>data-cleaning/data_cleaner.py"]
+    S1["1 · classify<br/>data-cleaning/<br/>column_filter_and_classify_v3.py"]
+    S2["2 · scraper<br/>scraper-full/scraper_engine.py"]
+    S3["3 · supplier resolution<br/>supplier-resolution/<br/>DISABLED in config"]
+    S4["4 · crossref<br/>cross-reference/<br/>crossref_standalone_fast.py"]
+  end
+
+  ENG["ScraperEngine<br/>sole download path<br/>owns every guardrail"]
+  PDPL["pdf_discovery_pipeline.py"]
+
+  WATCH --> ORCH
+  GUI --> ENG
+  DASH -. reads logs and status .-> ORCH
+  ORCH --> S0 --> S1 --> S2 --> S3 --> S4
+  S2 --> ENG
+  PDPL --> ENG
+
+  classDef box fill:#F7F8F4,stroke:#6B7268,color:#14171A,stroke-width:1px
+  classDef orch fill:#CFE4DE,stroke:#0E6A60,color:#0B4A43,stroke-width:2px
+  classDef eng fill:#FBE5DC,stroke:#A54428,color:#6E2C1B,stroke-width:2px
+  classDef offx fill:#EDEEE9,stroke:#A8ADA2,color:#6E7368,stroke-dasharray:4 3
+  class GUI,DASH,WATCH,S0,S1,S2,S4,PDPL box
+  class ORCH orch
+  class ENG eng
+  class S3 offx
+  style OPS fill:#F1F2ED,stroke:#C9CCC2,color:#14171A
+  style STAGES fill:#F1F2ED,stroke:#C9CCC2,color:#14171A
+</pre>
+      <figcaption>Solid arrows are calls. The dashed node is configured off. Every arrow into ScraperEngine is intentional — a second download path would bypass the guardrails.</figcaption>
+    </figure>
+
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Part</th><th>File</th><th>Role</th></tr></thead>
+        <tbody>
+          <tr><td>Orchestrator</td><td class="mono">src/services/pipeline.py</td><td>Runs stages in order, per-stage CLI skip/only flags, <code>stop_on_failure</code></td></tr>
+          <tr><td>Config</td><td class="mono">src/services/pipeline_config.json</td><td>Paths, stage toggles, scraper caps, crossref threshold</td></tr>
+          <tr><td>Crawl engine</td><td class="mono">scraper-full/scraper_engine.py</td><td>Discovery, download, validation, dedup, rate limiting, state DB</td></tr>
+          <tr><td>Desktop GUI</td><td class="mono">scraper-full/pdf_crawler_gui_2.py</td><td>Manual crawl driver; log pane via <code>_TkLogHandler</code></td></tr>
+          <tr><td>Web dashboard</td><td class="mono">ops/dashboard.py</td><td>Flask status page, <code>/</code> and <code>/api/status</code></td></tr>
+          <tr><td>Watchers</td><td class="mono">watch_input.py · ops/folder_monitor_service.py</td><td>Trigger a run when new input lands</td></tr>
+          <tr><td>Tests</td><td class="mono">tests/ · per-service tests/unit/</td><td>Classifier, keyword pruning, PDF relevance, scraper security</td></tr>
+          <tr><td>Keyword audit</td><td class="mono">tools/audit_keywords.py</td><td>One-off list audit tooling</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============ TECH STACK ============ -->
+  <section>
+    <div class="sec-head">
+      <span class="eyebrow">01b — Technology stack &amp; protocols</span>
+      <h2>What runs under the hood</h2>
+    </div>
+
+    <div class="col">
+      <h3>Runtime dependencies</h3>
+      <div class="tbl-scroll">
+        <table>
+          <thead><tr><th>Layer</th><th>Technology</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td>Language</td><td>Python 3.x (CPython)</td><td>Windows 11</td></tr>
+            <tr><td>HTTP client</td><td><code>requests</code> + <code>urllib3</code></td><td>All outbound web traffic; session-based with retry adapter</td></tr>
+            <tr><td>HTML parsing</td><td><code>beautifulsoup4</code> (html.parser)</td><td>Link extraction and search result scraping</td></tr>
+            <tr><td>Spreadsheet I/O</td><td><code>pandas</code> + <code>openpyxl</code> + <code>xlrd</code></td><td>All Excel/CSV read/write throughout the pipeline</td></tr>
+            <tr><td>PDF text extraction</td><td><code>PyPDF2</code> + <code>pdfplumber</code></td><td>crossref reads first-page text for relevance + matching</td></tr>
+            <tr><td>Desktop GUI</td><td><code>tkinter</code> (stdlib)</td><td>Manual crawl driver</td></tr>
+            <tr><td>Web dashboard</td><td>Flask + flask_cors</td><td>Status page at 0.0.0.0:443, self-signed TLS via openssl</td></tr>
+            <tr><td>File watcher</td><td><code>watchdog</code></td><td>Monitors input directory for new files</td></tr>
+            <tr><td>Database</td><td>SQLite 3 (stdlib)</td><td>Dedup/resume state only (<code>.scraper_dedup.db</code>)</td></tr>
+            <tr><td>Concurrency</td><td><code>threading</code> (stdlib)</td><td>Per-supplier crawl workers; debounce in watcher</td></tr>
+            <tr><td>Process parallelism</td><td><code>concurrent.futures.ProcessPoolExecutor</code></td><td>crossref PDF text extraction</td></tr>
+            <tr><td>Testing</td><td><code>pytest</code> + cov/mock/xdist</td><td>7 passing tests on the precision path</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="col">
+      <h3>Communication protocols</h3>
+      <p>All inter-component communication is <strong>in-process function calls</strong> &mdash; there
+        is no message bus, no RPC, no inter-service HTTP. The pipeline is a single Python
+        process that imports and calls each stage sequentially.</p>
+      <div class="tbl-scroll">
+        <table>
+          <thead><tr><th>Boundary</th><th>Protocol</th><th>Detail</th></tr></thead>
+          <tbody>
+            <tr><td>Orchestrator to stages</td><td>Python function call</td><td><code>importlib.util</code> dynamic import, then call the stage entry function</td></tr>
+            <tr><td>Scraper to vendor sites</td><td>HTTPS (TLS verified)</td><td><code>requests.Session</code> with HTTPAdapter + exponential backoff on 429/5xx</td></tr>
+            <tr><td>Scraper to search engines</td><td>HTTPS POST / GET</td><td>DuckDuckGo HTML form POST, Bing HTML GET; no API keys</td></tr>
+            <tr><td>Scraper to robots/sitemap</td><td>HTTP(S) GET</td><td>Standard robots exclusion + XML sitemap parsing</td></tr>
+            <tr><td>Watcher to pipeline</td><td><code>subprocess.run</code></td><td><code>watch_input.py</code> spawns <code>python pipeline.py</code> as child process</td></tr>
+            <tr><td>Dashboard to operator</td><td>HTTPS (self-signed) / HTTP fallback</td><td>Flask dev server; JSON at <code>/api/status</code>, HTML at <code>/</code></td></tr>
+            <tr><td>Dedup state</td><td>SQLite file I/O</td><td>Thread-safe; single writer, file lock</td></tr>
+            <tr><td>Stage-to-stage data</td><td>Local filesystem</td><td>Each stage reads previous stage's output files from disk (xlsx/csv/pdf)</td></tr>
+            <tr><td>Config</td><td>JSON file read</td><td><code>pipeline_config.json</code> loaded once at pipeline start</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="col">
+      <h3>HTTP session configuration</h3>
+      <p>The scraper's <code>_make_session()</code> factory produces a <code>requests.Session</code> with:</p>
+      <ul>
+        <li><strong>User-Agent</strong>: Chrome 120 on Windows 10 (deliberate impersonation to avoid bot blocks)</li>
+        <li><strong>Retry</strong>: 3 attempts, backoff factor 1.0, on status 429/500/502/503/504</li>
+        <li><strong>Allowed methods</strong>: HEAD and GET only</li>
+        <li><strong>Adapters</strong>: <code>HTTPAdapter</code> mounted on both <code>http://</code> and <code>https://</code></li>
+        <li><strong>Rate limiting</strong>: <code>_DomainRateLimiter</code> enforces 2.0s between requests to same domain, max 3 concurrent suppliers</li>
+      </ul>
+    </div>
+
+    <div class="col">
+      <h3>What is NOT used</h3>
+      <p>No Django, no FastAPI, no Celery, no Redis, no RabbitMQ, no Docker, no cloud
+        services, no API keys, no OAuth. The system is intentionally a local-only
+        single-machine batch pipeline with minimal dependencies.</p>
+    </div>
+  </section>
+
+  <!-- ============ DATA FLOW ============ -->
+  <section>
+    <div class="sec-head">
+      <span class="eyebrow">02 — Data flow</span>
+      <h2>Where the bytes actually live</h2>
+    </div>
+    <p>No database server and no cloud storage. Everything is files on local disk, and all working data sits outside the repo in <code>C:\Data\Crawler\</code>. The only persistent state that isn't a spreadsheet or a PDF is a SQLite file the crawler uses for dedup and resume.</p>
+
+    <figure class="diagram">
+<pre class="mermaid">
+%%{init: {'theme':'base','themeVariables':{'primaryColor':'#F7F8F4','primaryTextColor':'#14171A','primaryBorderColor':'#6B7268','secondaryColor':'#F7F8F4','tertiaryColor':'#F1F2ED','background':'#FBFBF8','mainBkg':'#F7F8F4','lineColor':'#6B7268','textColor':'#14171A','fontFamily':'Consolas, monospace','fontSize':'12px','clusterBkg':'#F1F2ED','clusterBorder':'#C9CCC2','titleColor':'#14171A','edgeLabelBackground':'#FBFBF8','nodeTextColor':'#14171A'}}}%%
+flowchart LR
+  subgraph DISK["Local disk · C:/Data/Crawler"]
+    direction TB
+    IN[("input/<br/>raw requisition<br/>xlsx and csv")]
+    LAB[("labeled/<br/>*_classified_v3.xlsx<br/>+ Type, Unit Price")]
+    OUT[("output/<br/>PDFs foldered<br/>by supplier")]
+    DB[(".scraper_dedup.db<br/>SQLite: seen_urls,<br/>downloaded, hashes")]
+  end
+
+  subgraph REPO["In repo · PROJECTS/"]
+    MASTER[("data/masterlist/<br/>updated_master_list.xlsx<br/>supplier + domain + items")]
+    RES[("cross-reference/results/<br/>crossref_results_TS.xlsx")]
+  end
+
+  WEB(("Vendor websites<br/>+ DuckDuckGo / Bing"))
+
+  IN -->|"0 clean in place"| IN
+  IN -->|"1 classify"| LAB
+  LAB -->|"Instrument + Software rows<br/>become keywords"| KW{{"supplier keyword sets<br/>in memory only"}}
+  MASTER -->|"supplier to domain pairs"| KW
+  KW -->|"2 scrape"| WEB
+  WEB -->|"PDFs that pass every gate"| OUT
+  OUT <-->|"url, path, sha256"| DB
+  LAB -->|"4 crossref"| RES
+  OUT -->|"4 crossref: text extract"| RES
+  MASTER -->|"fuzzy match, threshold 60"| RES
+
+  classDef store fill:#DDEAE5,stroke:#0E6A60,color:#0B4A43,stroke-width:1px
+  classDef net fill:#FBE5DC,stroke:#A54428,color:#6E2C1B,stroke-width:2px
+  classDef mem fill:#F7F8F4,stroke:#6B7268,color:#14171A,stroke-dasharray:4 3
+  class IN,LAB,OUT,DB,MASTER,RES store
+  class WEB net
+  class KW mem
+  style DISK fill:#F1F2ED,stroke:#C9CCC2,color:#14171A
+  style REPO fill:#F1F2ED,stroke:#C9CCC2,color:#14171A
+</pre>
+      <figcaption>The dashed node never touches disk — supplier keyword sets are built per run and discarded. The rust node is the only place data leaves the machine.</figcaption>
+    </figure>
+
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Location</th><th>Format</th><th>Written by</th><th>Read by</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">C:/Data/Crawler/input</td><td>xlsx / csv</td><td>Humans, upstream procurement</td><td>data_cleaner, classify</td></tr>
+          <tr><td class="mono">C:/Data/Crawler/labeled</td><td>xlsx, 6 cols incl. Type + Unit Price</td><td>classify</td><td>scraper (keywords), crossref</td></tr>
+          <tr><td class="mono">C:/Data/Crawler/output</td><td>PDF, foldered per supplier</td><td>ScraperEngine</td><td>crossref; purged after 30 days if unmatched</td></tr>
+          <tr><td class="mono">C:/Data/Crawler/review</td><td>PDF copies, timestamped subfolder</td><td>pipeline (post-crossref)</td><td>Humans; purged after 30 days</td></tr>
+          <tr><td class="mono">…/output/.scraper_dedup.db</td><td>SQLite</td><td>ScraperEngine</td><td>ScraperEngine (resume)</td></tr>
+          <tr><td class="mono">PROJECTS/data/masterlist/updated_master_list.xlsx</td><td>xlsx</td><td>Humans</td><td>scraper, crossref</td></tr>
+          <tr><td class="mono">cross-reference/results/</td><td>xlsx, timestamped</td><td>crossref</td><td>Humans</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============ STAGES ============ -->
+  <section>
+    <div class="sec-head">
+      <span class="eyebrow">03 — Stages</span>
+      <h2>The five stages, in enforced order</h2>
+    </div>
+    <p>The numbering is not cosmetic. Classify <em>must</em> run before scrape, because the Type column is what decides which keywords the crawler is allowed to look for. Run them out of order and the scraper refuses to start rather than crawling on an unfiltered keyword set.</p>
+
+    <!-- STAGE 0 -->
+    <div class="stage">
+      <div class="stage-num">0</div>
+      <div class="stage-body">
+        <h3>data_cleaner</h3>
+        <div class="io">
+          <div><dt>in</dt><dd>C:/Data/Crawler/input/*.xlsx</dd></div>
+          <div><dt>out</dt><dd>same files, normalized</dd></div>
+          <div><dt>code</dt><dd>data-cleaning/data_cleaner.py → clean_all_input_excels</dd></div>
+        </div>
+        <p>Normalizes raw requisition sheets before anything reads them. Supports a <code>dry_run</code> flag; reports files processed and rows cleaned.</p>
+      </div>
+    </div>
+
+    <!-- STAGE 1 -->
+    <div class="stage">
+      <div class="stage-num">1</div>
+      <div class="stage-body">
+        <h3>classify <span class="tag gate">gates everything downstream</span></h3>
+        <div class="io">
+          <div><dt>in</dt><dd>cleaned input xlsx</dd></div>
+          <div><dt>out</dt><dd>labeled/*_classified_v3.xlsx</dd></div>
+          <div><dt>code</dt><dd>data-cleaning/column_filter_and_classify_v3.py</dd></div>
+        </div>
+        <p>Sorts every line item into Instrument, Software, or Non-Instrument. Matching is whole-word — bare substring matching once scored "lysis" inside "anaLYSIS", which is how eleven identical MULTICLAMP rows disagreed with each other.</p>
+
+        <figure class="diagram">
+<pre class="mermaid">
+%%{init: {'theme':'base','themeVariables':{'primaryColor':'#F7F8F4','primaryTextColor':'#14171A','primaryBorderColor':'#6B7268','secondaryColor':'#F7F8F4','tertiaryColor':'#F1F2ED','background':'#FBFBF8','mainBkg':'#F7F8F4','lineColor':'#6B7268','textColor':'#14171A','fontFamily':'Consolas, monospace','fontSize':'12px','edgeLabelBackground':'#FBFBF8','nodeTextColor':'#14171A'}}}%%
+flowchart TB
+  ROW["line item text<br/>+ Unit Price"] --> RIDER{"_is_rider ?<br/>shipping, warranty,<br/>install, removal"}
+  RIDER -->|yes| NI["Non-Instrument"]
+  RIDER -->|no| HITS["_count_hits<br/>whole-word match<br/>against 3 keyword sets"]
+  HITS --> COMP{"in _COMPONENT_KEYWORDS ?<br/>controller, amplifier,<br/>headstage, rotor"}
+  COMP -->|yes| NI
+  COMP -->|no| STRONG{"strong instrument term ?<br/>centrifuge, microscope,<br/>freezer"}
+  STRONG -->|"1 hit is enough"| INST["Instrument"]
+  STRONG -->|no| WEAK{"_WEAK_HW term ?<br/>meter, analyzer,<br/>balance, furnace"}
+  WEAK -->|"needs a 2nd hit"| INST
+  WEAK -->|no| SW{"software terms ?"}
+  SW -->|yes| SOFT["Software"]
+  SW -->|no| RULEB{"Rule B<br/>Unit Price >= $1,000 ?"}
+  RULEB -->|yes| INST
+  RULEB -->|no| NI
+
+  INST --> KEEP["feeds scraper keywords"]
+  SOFT --> KEEP
+
+  classDef box fill:#F7F8F4,stroke:#6B7268,color:#14171A,stroke-width:1px
+  classDef keep fill:#DDEAE5,stroke:#0E6A60,color:#0B4A43,stroke-width:2px
+  classDef drop fill:#EDEEE9,stroke:#A8ADA2,color:#5F6459,stroke-width:1px
+  class ROW,RIDER,HITS,COMP,STRONG,WEAK,SW,RULEB box
+  class INST,SOFT,KEEP keep
+  class NI drop
+</pre>
+          <figcaption>Rig components are deliberately Non-Instrument: a MultiClamp 700B is a part of an ephys rig, not an instrument in its own right.</figcaption>
+        </figure>
+
+        <p class="note">Keyword lists live as frozensets in the classifier source, not in the <code>.txt</code> files — a learning-mode run would overwrite the text files. Post-audit sizes: Instrument 160, Software 157, Non-Instrument 478.</p>
+      </div>
+    </div>
+
+    <!-- STAGE 2 -->
+    <div class="stage">
+      <div class="stage-num">2</div>
+      <div class="stage-body">
+        <h3>scraper <span class="tag gate">fail-closed</span></h3>
+        <div class="io">
+          <div><dt>in</dt><dd>labeled/*.xlsx + updated_master_list.xlsx</dd></div>
+          <div><dt>out</dt><dd>C:/Data/Crawler/output/&lt;supplier&gt;/*.pdf</dd></div>
+          <div><dt>code</dt><dd>scraper-full/scraper_engine.py</dd></div>
+        </div>
+        <p>Three discovery routes tried in order, then a download gauntlet. If no classified files exist, the stage logs an error and refuses to crawl rather than falling back to a generic keyword set — that fail-closed choice is what stopped one vendor pulling 500+ PDFs off the word "server".</p>
+
+        <figure class="diagram">
+<pre class="mermaid">
+%%{init: {'theme':'base','themeVariables':{'primaryColor':'#F7F8F4','primaryTextColor':'#14171A','primaryBorderColor':'#6B7268','secondaryColor':'#F7F8F4','tertiaryColor':'#F1F2ED','background':'#FBFBF8','mainBkg':'#F7F8F4','lineColor':'#6B7268','textColor':'#14171A','fontFamily':'Consolas, monospace','fontSize':'12px','clusterBkg':'#F1F2ED','clusterBorder':'#C9CCC2','titleColor':'#14171A','edgeLabelBackground':'#FBFBF8','nodeTextColor':'#14171A'}}}%%
+flowchart TB
+  START["run: supplier_excel, output_dir"] --> LOADKW["load_supplier_keywords<br/>Type in Instrument, Software only"]
+  LOADKW --> EMPTY{"any keywords ?"}
+  EMPTY -->|no| REFUSE["ABORT<br/>refuse to crawl unfiltered"]
+  EMPTY -->|yes| PRUNE["prune_generic_keywords<br/>drop doc words, category nouns,<br/>cross-vendor tokens"]
+  PRUNE --> SKIPV["vendor left with nothing<br/>distinctive is skipped entirely"]
+  SKIPV --> PAIRS["_load_supplier_pairs<br/>only CSV-listed vendors"]
+  PAIRS --> RECENT{"scraped in last 7 days ?"}
+  RECENT -->|yes| SKIP2["skip"]
+  RECENT -->|no| DISC
+
+  subgraph DISC["Discovery · 3 routes, in order"]
+    direction TB
+    D1["1 · robots.txt then /sitemap.xml"]
+    D2["2 · site:domain filetype:pdf<br/>DuckDuckGo then Bing"]
+    D3["3 · recursive link walk<br/>max_depth 2, max_pages 50"]
+    D1 --> D2 --> D3
+  end
+
+  DISC --> GAUNT["download gauntlet<br/>see security section"]
+  GAUNT --> CAP{"50 PDFs for this supplier ?"}
+  CAP -->|yes| WARN["stop + warn<br/>a generic keyword slipped through"]
+  CAP -->|no| SAVE["save to output/supplier/"]
+
+  classDef box fill:#F7F8F4,stroke:#6B7268,color:#14171A,stroke-width:1px
+  classDef stop fill:#FBE5DC,stroke:#A54428,color:#6E2C1B,stroke-width:2px
+  classDef keep fill:#DDEAE5,stroke:#0E6A60,color:#0B4A43,stroke-width:2px
+  class START,LOADKW,EMPTY,PRUNE,SKIPV,PAIRS,RECENT,SKIP2,D1,D2,D3,GAUNT,CAP box
+  class REFUSE,WARN stop
+  class SAVE keep
+  style DISC fill:#F1F2ED,stroke:#C9CCC2,color:#14171A
+</pre>
+          <figcaption>The 50-PDF cap is a tripwire, not a quota. Hitting it means a keyword was too generic; the validated run hit it zero times.</figcaption>
+        </figure>
+      </div>
+    </div>
+
+    <!-- STAGE 3 -->
+    <div class="stage is-off">
+      <div class="stage-num">3</div>
+      <div class="stage-body">
+        <h3>supplier resolution <span class="tag off">disabled</span></h3>
+        <div class="io">
+          <div><dt>in</dt><dd>supplier names</dd></div>
+          <div><dt>out</dt><dd>candidate domains + confidence</dd></div>
+          <div><dt>code</dt><dd>supplier-resolution/{supplier_resolver, web_searcher, confidence_scorer}.py</dd></div>
+        </div>
+        <p>Resolves a supplier name to a website when the master list has no domain, scoring candidates for confidence. <code>run_supplier_resolution</code> is <code>false</code> in the config, so it does not run — but <code>web_searcher.py</code> is still live code: the scraper imports its DuckDuckGo and Bing helpers for discovery route 2.</p>
+      </div>
+    </div>
+
+    <!-- STAGE 4 -->
+    <div class="stage">
+      <div class="stage-num">4</div>
+      <div class="stage-body">
+        <h3>crossref</h3>
+        <div class="io">
+          <div><dt>in</dt><dd>most recent labeled xlsx + master list + PDF dir</dd></div>
+          <div><dt>out</dt><dd>cross-reference/results/crossref_results_&lt;ts&gt;.xlsx + C:/Data/Crawler/review/&lt;ts&gt;/</dd></div>
+          <div><dt>code</dt><dd>cross-reference/crossref_standalone_fast.py → CrossReferenceEngine</dd></div>
+        </div>
+        <p>Fuzzy-matches line items against the master list and the text of the downloaded PDFs at threshold 60, in low-CPU mode by default, then exports a timestamped results workbook. The last validated run matched 6 items.</p>
+        <h4>Post-crossref housekeeping</h4>
+        <ol>
+          <li><strong>Matched PDF collection</strong> — copies every matched PDF into <code>C:/Data/Crawler/review/&lt;timestamp&gt;/</code> for manual inspection alongside the results spreadsheet.</li>
+          <li><strong>Review purge</strong> — deletes review folders older than 30 days.</li>
+          <li><strong>Unmatched PDF purge</strong> — deletes PDFs in <code>output/</code> older than 30 days that were not in the current match set. The dedup DB retains their hashes so they will not be re-downloaded.</li>
+        </ol>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SECURITY ============ -->
+  <section>
+    <div class="sec-head">
+      <span class="eyebrow">04 — Security</span>
+      <h2>Trust boundaries and the gauntlet</h2>
+    </div>
+    <p>Crawler's threat model is mostly about untrusted remote content, not multi-user access: it fetches arbitrary files from arbitrary vendor websites and writes them to a Windows filesystem. The controls concentrate on that boundary — where a hostile or merely sloppy remote server could send a path, a redirect, or a payload the process shouldn't act on.</p>
+
+    <figure class="diagram">
+<pre class="mermaid">
+%%{init: {'theme':'base','themeVariables':{'primaryColor':'#F7F8F4','primaryTextColor':'#14171A','primaryBorderColor':'#6B7268','secondaryColor':'#F7F8F4','tertiaryColor':'#F1F2ED','background':'#FBFBF8','mainBkg':'#F7F8F4','lineColor':'#6B7268','textColor':'#14171A','fontFamily':'Consolas, monospace','fontSize':'12px','clusterBkg':'#F1F2ED','clusterBorder':'#C9CCC2','titleColor':'#14171A','edgeLabelBackground':'#FBFBF8','nodeTextColor':'#14171A'}}}%%
+flowchart LR
+  subgraph UNTRUSTED["UNTRUSTED · the open internet"]
+    direction TB
+    VEND["vendor web servers<br/>arbitrary HTML, redirects,<br/>arbitrary file bytes"]
+    SE["DuckDuckGo · Bing<br/>receives: site:domain filetype:pdf"]
+  end
+
+  subgraph BOUNDARY["TRUST BOUNDARY · ScraperEngine"]
+    direction TB
+    B1["_validate_url<br/>SSRF guard"]
+    B2["domain confinement<br/>+ rate limit + caps"]
+    B3["content validation<br/>type, magic bytes, size"]
+    B4["_sanitize_path<br/>path traversal guard"]
+    B5["sha256 dedup"]
+  end
+
+  subgraph TRUSTED["TRUSTED · local disk"]
+    direction TB
+    DISKO["C:/Data/Crawler/output"]
+    DISKI["C:/Data/Crawler/input + labeled<br/>never leaves the machine"]
+  end
+
+  subgraph LAN["LOCAL NETWORK"]
+    DASHB["Flask dashboard<br/>0.0.0.0:443 · no auth"]
+  end
+
+  VEND --> B1 --> B2 --> B3 --> B4 --> B5 --> DISKO
+  SE -.->|"vendor domain only"| VEND
+  DISKI -.-> DASHB
+  DISKO -.->|"status counts"| DASHB
+  DASHB -->|"readable by anyone<br/>on the network"| LANUSER(("LAN clients"))
+
+  classDef bad fill:#FBE5DC,stroke:#A54428,color:#6E2C1B,stroke-width:2px
+  classDef good fill:#DDEAE5,stroke:#0E6A60,color:#0B4A43,stroke-width:2px
+  classDef gate fill:#F7F8F4,stroke:#0E6A60,color:#14171A,stroke-width:1px
+  class VEND,SE,LANUSER bad
+  class DISKO,DISKI good
+  class B1,B2,B3,B4,B5 gate
+  class DASHB bad
+  style UNTRUSTED fill:#F7EDE9,stroke:#DDBCB0,color:#14171A
+  style BOUNDARY fill:#F1F2ED,stroke:#C9CCC2,color:#14171A
+  style TRUSTED fill:#EAF2EF,stroke:#B9D2CA,color:#14171A
+  style LAN fill:#F7EDE9,stroke:#DDBCB0,color:#14171A
+</pre>
+      <figcaption>Requisition contents never cross the boundary outbound. The only data that leaves is a vendor's own domain name, inside a search query.</figcaption>
+    </figure>
+
+    <h3>The download gauntlet</h3>
+    <p>Every candidate PDF passes these checks in sequence. Any one of them can drop the file, and several of them run before a single byte of body is read.</p>
+
+    <figure class="diagram">
+<pre class="mermaid">
+%%{init: {'theme':'base','themeVariables':{'primaryColor':'#F7F8F4','primaryTextColor':'#14171A','primaryBorderColor':'#6B7268','secondaryColor':'#F7F8F4','tertiaryColor':'#F1F2ED','background':'#FBFBF8','mainBkg':'#F7F8F4','lineColor':'#6B7268','textColor':'#14171A','fontFamily':'Consolas, monospace','fontSize':'12px','edgeLabelBackground':'#FBFBF8','nodeTextColor':'#14171A'}}}%%
+flowchart TB
+  U["candidate PDF url + anchor text"] --> G1{"_validate_url<br/>http/https · has a dot ·<br/>not localhost or 127.0.0.1"}
+  G1 -->|fail| X1["reject"]
+  G1 --> G2{"same netloc as<br/>the supplier domain ?"}
+  G2 -->|fail| X2["reject: off-domain"]
+  G2 --> G3{"_PDF_BLOCKLIST<br/>careers, candidate,<br/>investor, sustainability"}
+  G3 -->|match| X3["reject: HR/corporate doc"]
+  G3 --> G4{"_PDF_ALLOWLIST<br/>datasheet, manual, spec"}
+  G4 --> G5{"seen before ?<br/>SQLite seen_urls"}
+  G5 -->|yes| X5["skip"]
+  G5 --> RL["_DomainRateLimiter<br/>wait 2.0s for this domain"]
+  RL --> G6{"HEAD content-type<br/>is PDF ?"}
+  G6 -->|fail| X6["reject"]
+  G6 --> G7["GET stream=True<br/>8KB chunks"]
+  G7 --> G8{"%PDF magic bytes<br/>in first 1024 ?"}
+  G8 -->|fail| X8["reject: not a PDF"]
+  G8 --> G9{"size within<br/>512B .. 100MB ?"}
+  G9 -->|fail| X9["reject + delete"]
+  G9 --> G10["_sanitize_path<br/>strip dot-dot, slashes and<br/>reserved Windows chars"]
+  G10 --> G11{"_content_relevant<br/>supplier keyword on page 1 ?"}
+  G11 -->|fail| X11["reject"]
+  G11 --> G12{"sha256 already<br/>in hashes table ?"}
+  G12 -->|yes| X12["skip: duplicate content"]
+  G12 --> KEEP["KEEP · write to<br/>output/supplier/"]
+
+  classDef box fill:#F7F8F4,stroke:#6B7268,color:#14171A,stroke-width:1px
+  classDef bad fill:#FBE5DC,stroke:#A54428,color:#6E2C1B,stroke-width:1px
+  classDef keep fill:#DDEAE5,stroke:#0E6A60,color:#0B4A43,stroke-width:2px
+  class U,G1,G2,G3,G4,G5,RL,G6,G7,G8,G9,G10,G11,G12 box
+  class X1,X2,X3,X5,X6,X8,X9,X11,X12 bad
+  class KEEP keep
+</pre>
+      <figcaption>Order matters: the cheap rejections come first, and the rate limiter sits after the free checks so blocked URLs cost no wall-clock time.</figcaption>
+    </figure>
+
+    <h3>Control inventory</h3>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Control</th><th>Where</th><th>What it stops</th><th>Setting</th></tr></thead>
+        <tbody>
+          <tr><td>SSRF guard</td><td class="mono">_validate_url</td><td>Crawling loopback or schemeless internal hosts</td><td class="num">blocks localhost, 127.0.0.1</td></tr>
+          <tr><td>Path traversal guard</td><td class="mono">_sanitize_path</td><td>A remote filename escaping the output folder or using reserved Windows chars</td><td class="num">strips <code>..</code> <code>/</code> <code>\</code> <code>&lt;&gt;:"|?*</code></td></tr>
+          <tr><td>Domain confinement</td><td class="mono">_crawl_recursive</td><td>Following links off the supplier's own domain</td><td class="num">netloc equality</td></tr>
+          <tr><td>Allowlist of vendors</td><td class="mono">_load_supplier_pairs</td><td>Crawling anything not on the master list</td><td class="num">allowlist_only: true</td></tr>
+          <tr><td>Fail-closed keyword gate</td><td class="mono">load_supplier_keywords</td><td>Crawling on an unfiltered keyword set</td><td class="num">abort if empty</td></tr>
+          <tr><td>Per-domain rate limit</td><td class="mono">_DomainRateLimiter</td><td>Hammering a vendor; thread-safe across workers</td><td class="num">2.0 s · 3 concurrent</td></tr>
+          <tr><td>Crawl caps</td><td class="mono">DEFAULT_SITE_CONFIG</td><td>Runaway crawls and catalogue dumps</td><td class="num">50 pages · 50 PDFs · depth 2</td></tr>
+          <tr><td>Backoff on failure</td><td class="mono">_make_session</td><td>Retry storms against a struggling host</td><td class="num">3 retries, factor 1.0, on 429/5xx</td></tr>
+          <tr><td>Content-type check</td><td class="mono">_download_pdf</td><td>Saving HTML error pages as PDFs</td><td class="num">HEAD then GET</td></tr>
+          <tr><td>Magic-byte check</td><td class="mono">_download_pdf</td><td>Mislabelled or disguised payloads</td><td class="num">%PDF in first 1024 B</td></tr>
+          <tr><td>Size bounds</td><td class="mono">ScraperEngine.__init__</td><td>Disk exhaustion and empty stubs</td><td class="num">512 B – 100 MB</td></tr>
+          <tr><td>Relevance blocklist</td><td class="mono">_PDF_BLOCKLIST</td><td>HR and investor docs that carry the brand plus the word "guide"</td><td class="num">regex</td></tr>
+          <tr><td>First-page check</td><td class="mono">_content_relevant</td><td>On-topic-looking filenames with off-topic contents</td><td class="num">fails open on scans</td></tr>
+          <tr><td>Content dedup</td><td class="mono">_file_hash + hashes table</td><td>The same document under many URLs</td><td class="num">SHA-256</td></tr>
+          <tr><td>TLS verification</td><td class="mono">requests defaults</td><td>MITM on vendor fetches</td><td class="num">on — never disabled anywhere in src/</td></tr>
+          <tr><td>Dashboard transport</td><td class="mono">ops/dashboard.py</td><td>Plaintext status on the wire</td><td class="num">HTTPS, self-signed, debug off</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>What leaves the machine</h3>
+    <ul class="tight">
+      <li><b>Nothing from the requisitions.</b> Input, labeled, and output data stay on local disk. There is no telemetry, no API key, and no cloud upload path in the codebase.</li>
+      <li><b>Vendor domain names</b>, in search queries of the form <code>site:&lt;domain&gt; filetype:pdf</code> sent to DuckDuckGo and Bing. That reveals which vendors are being researched — not what is being bought.</li>
+      <li><b>Ordinary HTTP requests</b> to vendor sites, which reveal your IP and a Chrome-shaped User-Agent to those vendors.</li>
+    </ul>
+  </section>
+
+  <!-- ============ GAPS ============ -->
+  <section>
+    <div class="sec-head">
+      <span class="eyebrow">05 — Findings</span>
+      <h2>Gaps worth knowing about</h2>
+    </div>
+    <p>These are observations from reading the current code, not speculation. None of them block the pipeline; three of them concern the dashboard, which is the weakest part of the security story.</p>
+
+    <div class="gaps">
+      <div class="gap">
+        <h3>The dashboard binds to every interface with no authentication</h3>
+        <p><code>app.run(host="0.0.0.0", port=443)</code> in <code>ops/dashboard.py</code>. Anyone who can reach the machine on the network can read <code>/</code> and <code>/api/status</code>. Bind to <code>127.0.0.1</code> if the operator is local, or put auth in front of it.</p>
+      </div>
+      <div class="gap">
+        <h3>It silently falls back to plaintext on port 443</h3>
+        <p>If <code>openssl</code> is missing, cert generation fails, the code prints a warning and calls <code>app.run(host="0.0.0.0", port=443)</code> with no <code>ssl_context</code> — serving HTTP on the HTTPS port. Clients expecting TLS get a confusing failure, and anyone who connects plainly gets served.</p>
+      </div>
+      <div class="gap">
+        <h3>The certificate is self-signed with CN=localhost</h3>
+        <p>Generated on first run for 365 days, <code>-nodes</code> so the key is unencrypted on disk at <code>ops/key.pem</code>. Fine for a single-operator box; it authenticates nothing.</p>
+      </div>
+      <div class="gap">
+        <h3>Crossref's primary file glob never matches</h3>
+        <p><code>run_crossref</code> looks for <code>*_labeled.xlsx</code>, but classify writes <code>*_classified_v3.xlsx</code>. Every run therefore takes the fallback branch — "any .xlsx in the labeled dir, most recent by mtime". It works today, but it will happily pick up an unrelated spreadsheet dropped in that folder.</p>
+      </div>
+      <div class="gap">
+        <h3>strict_content_validation is off</h3>
+        <p><code>false</code> in both the config and the constructor default. The <code>%PDF</code> magic-byte check still runs, so the practical exposure is small — but the content-type rejection is advisory rather than enforced.</p>
+      </div>
+      <div class="gap">
+        <h3>The User-Agent impersonates Chrome 120</h3>
+        <p>Deliberate, and common practice for crawlers that would otherwise be blocked. Worth naming explicitly: vendor logs will not show that an automated tool visited.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ DORMANT ============ -->
+  <section>
+    <div class="sec-head">
+      <span class="eyebrow">06 — Dormant</span>
+      <h2>Code that is present but not wired in</h2>
+    </div>
+    <p>A meaningful fraction of the tree is superseded. Knowing which parts are inert is part of knowing the app.</p>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Component</th><th>Status</th><th>Why it matters</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">classify/adaptive_excel_processor.py</td><td>Dormant, keep dormant</td><td>The old learning mode. Its validator was inverted — it rejected "microscope" as a model number while accepting "buyout". Reachable only from monitor UIs; no such service is installed.</td></tr>
+          <tr><td class="mono">"learning_mode": true</td><td>Dead config key</td><td>In <code>pipeline_config.json</code>, read by nothing on the pipeline path. Worth deleting so nobody flips it on and re-rots the keyword lists.</td></tr>
+          <tr><td class="mono">classify/v2_monitor/ · simple_monitor.py · Updated_Monitor_UI.py</td><td>Superseded</td><td>Earlier folder-watch UIs, replaced by <code>watch_input.py</code> and <code>ops/folder_monitor_service.py</code>.</td></tr>
+          <tr><td class="mono">column_filter_and_classify.py · _v2.py</td><td>Superseded</td><td>v3 is the live classifier.</td></tr>
+          <tr><td class="mono">*/archive/ folders</td><td>Superseded</td><td>Old scrapers, crossref recovery scripts, one-shot diagnostics.</td></tr>
+          <tr><td class="mono">Crawlers.exe · WebScrapper.exe</td><td>Do not use</td><td>Predate the guardrails entirely. Current build is <code>scraper-full/dist/PDF_Crawler_GUI.exe</code>.</td></tr>
+          <tr><td class="mono">Multi-module/</td><td>Separate submodule</td><td>Its own git repo with a parallel copy of the tree.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer class="col" style="display:flex;flex-direction:column;gap:var(--s2);border-top:1px solid var(--rule);padding-top:var(--s3)">
+    <span class="eyebrow">Sources</span>
+    <p class="note">Every claim on this page is read from the working tree at <code>C:\projects\Crawler\PROJECTS</code> on branch <code>cleanup/ponytail-audit</code>: <code>pipeline.py</code>, <code>pipeline_config.json</code>, <code>scraper_engine.py</code>, <code>column_filter_and_classify_v3.py</code>, <code>ops/dashboard.py</code>, <code>web_searcher.py</code>, and the unit tests under <code>tests/unit/</code>. Run figures come from the validated end-to-end run recorded in <code>tasks/scraper-precision/STATE.md</code>.</p>
+  </footer>
+
+</div>
+
+<!-- Standalone rendering: the artifact host supplies mermaid, a local file does not.
+     Needs an internet connection the first time; diagrams show as plain text without it. -->
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: "base",
+    securityLevel: "loose",
+    flowchart: { htmlLabels: true, useMaxWidth: false }
+  });
+</script>
+</body>
+</html>

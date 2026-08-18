@@ -1,33 +1,52 @@
 """
 Headless Scraper Engine
 =======================
-Contains the core crawling logic extracted from pdf_crawler_gui_2.py so it
-can be driven programmatically (e.g. from pipeline.py) without a GUI.
+Crawls ~50 supplier websites and downloads product PDFs.
 
-The public API is intentionally small:
+Architecture
+------------
+- Per-domain queues: one worker thread per domain, serialising requests
+  within a domain while all domains crawl concurrently.  This respects
+  each site's rate limit without throttling unrelated sites.
+- Sitemap-first discovery: robots.txt -> /sitemap.xml fallbacks before
+  any link-walking.  Many suppliers list their PDFs directly.
+- Search-based fallback: ``site:<domain> filetype:pdf`` via DuckDuckGo /
+  Bing HTML interface - never touches the target site's own search box.
+- Dedup + resume: SQLite tracks seen URLs and downloaded files so a
+  restart skips completed work.
+- Per-site config: optional JSON file lets you tune delay, max pages,
+  or disable recursive crawl on a per-domain basis without code changes.
+- Relevance filtering: blocklist skips obviously irrelevant PDFs (terms,
+  invoices, SDS sheets, etc.).  Allowlist-only mode restricts to
+  product docs (catalog, datasheet, spec, manual...).
 
+Scope: Stage 1 (discovery + fetch) only.
+       Classification (Stage 2) and cross-reference (Stage 3) are untouched.
+
+Public API
+----------
     engine = ScraperEngine(config)
     engine.run(supplier_excel, output_dir)   # blocks until done / stopped
-    engine.stop()                            # signal early stop from another thread
-
-All user-visible output goes through the standard ``logging`` module.
+    engine.stop()                            # signal early stop
 """
 
-import os
-import sys
-import re
-import time
-import threading
-import logging
-import hashlib
 import gc
+import hashlib
 import json
-from pathlib import Path
+import logging
+import os
+import re
+import sqlite3
+import threading
+import time
+from collections import Counter
 from datetime import datetime, timedelta
+from pathlib import Path
+from queue import Queue, Empty
 from urllib.parse import urlparse, urljoin
 
-import requests
 import pandas as pd
+import requests
 from bs4 import BeautifulSoup
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -35,26 +54,158 @@ from urllib3.util.retry import Retry
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Security helpers (mirrors the GUI module)
+# Optional web_searcher (search-based PDF discovery)
+# ---------------------------------------------------------------------------
+try:
+    import sys as _sys, os as _os
+    _sys.path.insert(
+        0,
+        _os.path.join(_os.path.dirname(os.path.abspath(__file__)), "..", "supplier-resolution"),
+    )
+    from web_searcher import search_duckduckgo, search_bing
+    _HAS_WEB_SEARCHER = True
+except ImportError:
+    _HAS_WEB_SEARCHER = False
+
+# ---------------------------------------------------------------------------
+# Keyword-based filtering + Camofox integration
+# ---------------------------------------------------------------------------
+_HARDWARE_KEYWORDS_FILE = r"C:\Data\Crawler\labeled\hardware_keywords_ACTIVE.txt"
+_SOFTWARE_KEYWORDS_FILE = r"C:\Data\Crawler\labeled\software_keywords_ACTIVE.txt"
+_CAMOFOX_API = "http://localhost:8000"  # Local camofox server (default port)
+_HAS_CAMOFOX = False
+_KEYWORDS_ACTIVE = set()
+
+
+def _load_keywords() -> set:
+    """Load hardware + software keywords from files."""
+    keywords = set()
+    for fpath in [_HARDWARE_KEYWORDS_FILE, _SOFTWARE_KEYWORDS_FILE]:
+        if os.path.exists(fpath):
+            try:
+                with open(fpath, encoding="utf-8") as f:
+                    for line in f:
+                        kw = line.strip()
+                        if kw and not kw.startswith("#"):
+                            keywords.add(kw.lower())
+            except Exception as exc:
+                logger.warning("Could not load keywords from %s: %s", fpath, exc)
+    logger.info("Loaded %d keywords for supplier filtering", len(keywords))
+    return keywords
+
+
+def _check_page_keywords(url: str, keywords: set, timeout: int = 15) -> bool:
+    """
+    Use camofox to load the page and check if it contains any keywords.
+    Returns True if ≥1 keyword found, False otherwise.
+    """
+    if not keywords:
+        return True  # No filter = allow all
+    try:
+        resp = requests.post(
+            f"{_CAMOFOX_API}/api/browse",
+            json={"url": url},
+            timeout=timeout,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            snapshot = data.get("snapshot", "").lower()
+            found = [kw for kw in keywords if kw in snapshot]
+            if found:
+                logger.info("[%s] Found keywords: %s", urlparse(url).netloc, ", ".join(found[:3]))
+                return True
+            else:
+                logger.info("[%s] No relevant keywords on page", urlparse(url).netloc)
+                return False
+        else:
+            logger.warning("Camofox returned %d for %s", resp.status_code, url)
+            return True  # Fallback: allow if camofox fails
+    except requests.exceptions.ConnectionError:
+        logger.warning("Camofox not running at %s - skipping keyword filter", _CAMOFOX_API)
+        return True  # Fallback: allow if camofox unavailable
+    except Exception as exc:
+        logger.warning("Camofox error for %s: %s", url, exc)
+        return True  # Fallback: allow on error
+
+# ---------------------------------------------------------------------------
+# PDF relevance filtering
+# ---------------------------------------------------------------------------
+
+_PDF_BLOCKLIST = re.compile(
+    r"(terms[_\-\s]?of[_\-\s]?(use|service)|privacy[_\-\s]?policy|cookie[_\-\s]?policy"
+    r"|warranty|return[_\-\s]?policy|refund|invoice|receipt|purchase[_\-\s]?order"
+    r"|msds|sds|safety[_\-\s]?data|material[_\-\s]?safety"
+    r"|annual[_\-\s]?report|financial[_\-\s]?report|10\-?k|10\-?q"
+    r"|press[_\-\s]?release|newsletter|whitepaper|case[_\-\s]?study"
+    r"|compliance|regulatory|iso[_\-\s]?cert|certificate[_\-\s]?of"
+    r"|nda|agreement|contract|legal|disclaimer"
+    r"|map|directions|parking|exhibit[_\-\s]?hall"
+    # HR / corporate: these carry the vendor's brand and words like "guide"
+    # or "brochure", so the allowlist waves them through otherwise.
+    r"|career|careers|candidate|recruit|job[_\-\s]?(description|posting)"
+    r"|working[_\-\s]?at|employee|benefits[_\-\s]?(guide|summary)"
+    r"|onboarding|code[_\-\s]?of[_\-\s]?conduct|esg|sustainability"
+    r"|investor|annual[_\-\s]?meeting|proxy"
+    r"|irs|tax|form[_\-\s]?(w2|1040|1099|941|940|990|k1|ct[_\-]?1)"
+    r"|w\-?2|1099|941|940|990|k\-?1|ct[_\-]?1"
+    r"|earnings|payroll|deduction|withhold|federal|state[_\-\s]?tax)",
+    re.IGNORECASE,
+)
+
+_PDF_ALLOWLIST = re.compile(
+    r"(catalog|catalogue|datasheet|data[_\-]?sheet|spec(ification)?s?"
+    r"|product[_\-]?(guide|list|range|brochure|sheet|info|overview)"
+    r"|price[_\-]?list|pricelist|part[_\-]?list|parts[_\-]?list"
+    r"|technical|install(ation)?|manual|guide|brochure|ifu|instructions?"
+    r"|accessory|accessories|selection[_\-]?guide"
+    r"|flyer|bulletin|literature|resource|quickstart|quick[_\-]?start"
+    r"|user[_\-]?guide|reference[_\-]?guide|operator[_\-]?manual"
+    r"|service[_\-]?manual|maintenance|setup|configuration"
+    r"|protocol|application[_\-]?note|app[_\-]?note|tech[_\-]?note)",
+    re.IGNORECASE,
+)
+
+
+def _score_pdf_relevance(url: str, anchor_text: str = "") -> tuple[bool, str]:
+    """Return (should_download, reason). Checked before any network request."""
+    combined = f"{url} {anchor_text}".lower()
+    if _PDF_BLOCKLIST.search(combined):
+        return False, "blocklist_match"
+    if _PDF_ALLOWLIST.search(combined):
+        return True, "allowlist_match"
+    return True, "default_allow"
+
+
+def _keywords_match(keywords, text: str) -> bool:
+    """True if any keyword hits ``text`` (pre-normalized, space-separated).
+
+    ponytail: short tokens ("kit", "lab", "1064") need exact-word match;
+    substring only for 5+ chars ("microscope" matches "microscopes").
+    """
+    words = set(text.split())
+    return any((kw in text) if len(kw) >= 5 else (kw in words) for kw in keywords)
+
+
+# ---------------------------------------------------------------------------
+# Security helpers
 # ---------------------------------------------------------------------------
 
 def _validate_url(url: str) -> bool:
-    """Return True only for safe http/https URLs."""
     try:
-        parsed = urlparse(url)
-        if parsed.scheme not in ("http", "https"):
-            return False
-        if not parsed.netloc:
-            return False
-        if "localhost" in parsed.netloc or "127.0.0.1" in parsed.netloc:
-            return False
-        return True
+        p = urlparse(url)
+        host = p.netloc.split(":")[0]  # strip port if present
+        return (
+            p.scheme in ("http", "https")
+            and bool(host)
+            and "." in host          # require at least one dot (real domain)
+            and "localhost" not in host
+            and "127.0.0.1" not in host
+        )
     except Exception:
         return False
 
 
 def _sanitize_path(path: str) -> str:
-    """Remove path-traversal and dangerous characters from a filename."""
     path = path.replace("..", "").replace("/", "_").replace("\\", "_")
     for ch in '<>:"|?*':
         path = path.replace(ch, "_")
@@ -62,11 +213,10 @@ def _sanitize_path(path: str) -> str:
 
 
 def _file_hash(file_path: str) -> str | None:
-    """SHA-256 hash of a file, or None on error."""
     try:
         h = hashlib.sha256()
         with open(file_path, "rb") as f:
-            for chunk in iter(lambda: f.read(4096), b""):
+            for chunk in iter(lambda: f.read(8192), b""):
                 h.update(chunk)
         return h.hexdigest()
     except Exception:
@@ -74,21 +224,201 @@ def _file_hash(file_path: str) -> str | None:
 
 
 # ---------------------------------------------------------------------------
-# Rate-limited HTTP adapter
+# Per-domain rate limiter
 # ---------------------------------------------------------------------------
 
-class _RateLimitedAdapter(HTTPAdapter):
-    def __init__(self, request_delay: float = 2.0, **kwargs):
-        self._min_interval = request_delay
-        self._last_request = 0.0
-        super().__init__(**kwargs)
+class _DomainRateLimiter:
+    """Thread-safe per-domain delay enforcement."""
 
-    def send(self, request, **kwargs):
-        elapsed = time.time() - self._last_request
-        if elapsed < self._min_interval:
-            time.sleep(self._min_interval - elapsed)
-        self._last_request = time.time()
-        return super().send(request, **kwargs)
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._last: dict[str, float] = {}
+
+    def wait(self, domain: str, delay: float) -> None:
+        with self._lock:
+            elapsed = time.monotonic() - self._last.get(domain, 0.0)
+            gap = delay - elapsed
+        if gap > 0:
+            time.sleep(gap)
+        with self._lock:
+            self._last[domain] = time.monotonic()
+
+
+# ---------------------------------------------------------------------------
+# State DB (dedup + resume)
+# ---------------------------------------------------------------------------
+
+class _StateDB:
+    """
+    SQLite-backed dedup and resume store.
+
+    Tables:
+      seen_urls  (url TEXT PRIMARY KEY, status TEXT, ts TEXT)
+      downloaded (path TEXT PRIMARY KEY, url TEXT, supplier TEXT, ts TEXT)
+    """
+
+    def __init__(self, db_path: str):
+        self._path = db_path
+        self._local = threading.local()
+        self._init_schema()
+
+    def _conn(self) -> sqlite3.Connection:
+        if not hasattr(self._local, "conn"):
+            self._local.conn = sqlite3.connect(self._path, check_same_thread=False)
+            self._local.conn.execute("PRAGMA journal_mode=WAL")
+        return self._local.conn
+
+    def _init_schema(self):
+        c = self._conn()
+        c.executescript("""
+            CREATE TABLE IF NOT EXISTS seen_urls (
+                url     TEXT PRIMARY KEY,
+                status  TEXT,
+                ts      TEXT
+            );
+            CREATE TABLE IF NOT EXISTS downloaded (
+                path     TEXT PRIMARY KEY,
+                url      TEXT,
+                supplier TEXT,
+                ts       TEXT
+            );
+            CREATE TABLE IF NOT EXISTS hashes (
+                hash TEXT PRIMARY KEY
+            );
+        """)
+        c.commit()
+
+    def is_seen(self, url: str) -> bool:
+        row = self._conn().execute(
+            "SELECT 1 FROM seen_urls WHERE url=?", (url,)
+        ).fetchone()
+        return row is not None
+
+    def mark_seen(self, url: str, status: str = "queued"):
+        try:
+            self._conn().execute(
+                "INSERT OR IGNORE INTO seen_urls(url,status,ts) VALUES(?,?,?)",
+                (url, status, datetime.utcnow().isoformat()),
+            )
+            self._conn().commit()
+        except Exception:
+            pass
+
+    def update_status(self, url: str, status: str):
+        try:
+            self._conn().execute(
+                "UPDATE seen_urls SET status=?,ts=? WHERE url=?",
+                (status, datetime.utcnow().isoformat(), url),
+            )
+            self._conn().commit()
+        except Exception:
+            pass
+
+    def is_downloaded(self, path: str) -> bool:
+        row = self._conn().execute(
+            "SELECT 1 FROM downloaded WHERE path=?", (path,)
+        ).fetchone()
+        return row is not None
+
+    def mark_downloaded(self, path: str, url: str, supplier: str):
+        try:
+            self._conn().execute(
+                "INSERT OR REPLACE INTO downloaded(path,url,supplier,ts) VALUES(?,?,?,?)",
+                (path, url, supplier, datetime.utcnow().isoformat()),
+            )
+            self._conn().commit()
+        except Exception:
+            pass
+
+    def is_hash_seen(self, file_hash: str) -> bool:
+        row = self._conn().execute(
+            "SELECT 1 FROM hashes WHERE hash=?", (file_hash,)
+        ).fetchone()
+        return row is not None
+
+    def mark_hash(self, file_hash: str):
+        try:
+            self._conn().execute(
+                "INSERT OR IGNORE INTO hashes(hash) VALUES(?)", (file_hash,)
+            )
+            self._conn().commit()
+        except Exception:
+            pass
+
+    def close(self):
+        if hasattr(self._local, "conn"):
+            self._local.conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Per-site config
+# ---------------------------------------------------------------------------
+
+DEFAULT_SITE_CONFIG = {
+    "delay": 2.0,           # seconds between requests to this domain
+    "max_pages": 50,        # hard cap on link-walk pages
+    "max_pdfs_per_supplier": 50,  # hard cap on downloads per supplier; a run
+                                  # past this means a generic keyword slipped
+                                  # through, not 50+ relevant docs
+    "use_sitemap": True,    # attempt sitemap discovery
+    "use_search": True,     # attempt filetype:pdf search discovery
+    "use_recursive": True,  # fall back to recursive link-walking
+    "max_depth": 2,         # recursive crawl depth
+}
+
+
+def _load_site_configs(config_path: str | None) -> dict[str, dict]:
+    """
+    Load per-site overrides from a JSON file.  Example:
+
+        {
+          "example.com": {"delay": 5.0, "use_recursive": false},
+          "slow-site.net": {"delay": 10.0, "max_pages": 20}
+        }
+
+    Any missing key falls back to DEFAULT_SITE_CONFIG.
+    """
+    if not config_path or not os.path.exists(config_path):
+        return {}
+    try:
+        with open(config_path, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as exc:
+        logger.warning("Could not load site config %s: %s", config_path, exc)
+        return {}
+
+
+def _site_cfg(domain: str, overrides: dict[str, dict]) -> dict:
+    """Merge per-site overrides onto the defaults."""
+    base = dict(DEFAULT_SITE_CONFIG)
+    base.update(overrides.get(domain, {}))
+    return base
+
+
+# ---------------------------------------------------------------------------
+# HTTP session factory
+# ---------------------------------------------------------------------------
+
+_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/120.0.0.0 Safari/537.36"
+)
+
+
+def _make_session(timeout: int = 15) -> requests.Session:
+    s = requests.Session()
+    s.headers.update({"User-Agent": _USER_AGENT})
+    retry = Retry(
+        total=3,
+        backoff_factor=1.0,
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=["HEAD", "GET"],
+    )
+    adapter = HTTPAdapter(max_retries=retry)
+    s.mount("http://", adapter)
+    s.mount("https://", adapter)
+    return s
 
 
 # ---------------------------------------------------------------------------
@@ -97,73 +427,73 @@ class _RateLimitedAdapter(HTTPAdapter):
 
 class ScraperEngine:
     """
-    Headless crawler.  Reads a supplier list from an Excel file, crawls each
-    supplier's website, and downloads PDFs to ``output_dir/<Supplier Name>/``.
-
     Parameters
     ----------
-    max_concurrent : int
-        Maximum simultaneous crawl threads.
-    request_delay : float
-        Minimum seconds between HTTP requests (politeness).
     page_timeout : int
-        HTTP request timeout in seconds.
-    max_pages_per_site : int
-        Hard cap on pages visited per supplier.
+        Per-request HTTP timeout (seconds).
     max_pdf_size_mb : int
-        PDFs larger than this are skipped.
+        Skip PDFs larger than this.
     min_pdf_size_bytes : int
-        PDFs smaller than this are deleted after download.
+        Delete downloaded files smaller than this.
     strict_content_validation : bool
-        When True, skip URLs whose Content-Type does not contain 'pdf'.
+        Reject responses whose Content-Type is not PDF.
     verbose : bool
-        Log every page visit (noisy but useful for debugging).
-    batch_size : int
-        Number of suppliers processed per batch before gc.collect().
+        Log every URL visited.
     skip_recent_sites : bool
-        When True, skip suppliers that were scraped less than days_before_rescrape ago.
+        Skip suppliers crawled within days_before_rescrape days.
     days_before_rescrape : int
-        Number of days before a supplier should be re-scraped (default 7).
+        Freshness window (default 7).
+    use_relevance_filter : bool
+        Apply blocklist filter before each download.
+    allowlist_only : bool
+        Only download PDFs matching the product-doc allowlist.
+    site_config_path : str | None
+        Path to per-domain JSON config (optional).
     """
 
     def __init__(
         self,
-        max_concurrent: int = 3,
-        request_delay: float = 2.0,
         page_timeout: int = 15,
-        max_pages_per_site: int = 50,
         max_pdf_size_mb: int = 100,
         min_pdf_size_bytes: int = 512,
         strict_content_validation: bool = False,
         verbose: bool = False,
-        batch_size: int = 10,
         skip_recent_sites: bool = True,
         days_before_rescrape: int = 7,
+        use_relevance_filter: bool = True,
+        allowlist_only: bool = False,
+        site_config_path: str | None = None,
+        use_keyword_filter: bool = True,
+        supplier_keywords: dict[str, list[str]] | None = None,
     ):
-        self.max_concurrent = max_concurrent
-        self.request_delay = request_delay
         self.page_timeout = page_timeout
-        self.max_pages_per_site = max_pages_per_site
         self.max_pdf_size_mb = max_pdf_size_mb
         self.min_pdf_size_bytes = min_pdf_size_bytes
         self.strict_content_validation = strict_content_validation
         self.verbose = verbose
-        self.batch_size = batch_size
         self.skip_recent_sites = skip_recent_sites
         self.days_before_rescrape = days_before_rescrape
+        self.use_relevance_filter = use_relevance_filter
+        self.allowlist_only = allowlist_only
+        self.use_keyword_filter = use_keyword_filter
+        self.supplier_keywords = supplier_keywords or {}
+        self._site_overrides = _load_site_configs(site_config_path)
+        self.keywords = _load_keywords() if use_keyword_filter else set()
 
         self._stop_event = threading.Event()
+        self._rate_limiter = _DomainRateLimiter()
         self.page_count = 0
         self.pdf_count = 0
-        self.session = self._create_session()
-        self._scrape_state = {}  # Holds last-scrape timestamps
+        self._count_lock = threading.Lock()
+        self._supplier_pdf_counts: Counter = Counter()
+        self._warned_no_kw: set[str] = set()
+        self._warned_pdf_cap: set[str] = set()
 
     # ------------------------------------------------------------------
     # Control
     # ------------------------------------------------------------------
 
     def stop(self):
-        """Signal the engine to stop after the current download finishes."""
         self._stop_event.set()
 
     @property
@@ -171,64 +501,82 @@ class ScraperEngine:
         return not self._stop_event.is_set()
 
     # ------------------------------------------------------------------
-    # State file management (7-day smart detection)
+    # 7-day state (JSON, same as before)
     # ------------------------------------------------------------------
 
-    def _get_state_file_path(self, output_dir: str) -> str:
-        """Return the path to the scraper state file."""
+    def _scrape_state_path(self, output_dir: str) -> str:
         return os.path.join(output_dir, ".scraper_state.json")
 
     def _load_scrape_state(self, output_dir: str) -> dict:
-        """Load last-scrape timestamps from state file. Return empty dict if missing or corrupted."""
-        state_file = self._get_state_file_path(output_dir)
-        if not os.path.exists(state_file):
+        p = self._scrape_state_path(output_dir)
+        if not os.path.exists(p):
             return {}
         try:
-            with open(state_file, "r", encoding="utf-8") as f:
+            with open(p, encoding="utf-8") as f:
                 return json.load(f)
-        except Exception as exc:
-            logger.warning("Could not load scrape state from %s: %s — starting fresh", state_file, exc)
+        except Exception:
             return {}
 
-    def _save_scrape_state(self, state: dict, output_dir: str) -> None:
-        """Save last-scrape timestamps to state file (atomic write)."""
-        state_file = self._get_state_file_path(output_dir)
+    def _save_scrape_state(self, state: dict, output_dir: str):
+        p = self._scrape_state_path(output_dir)
+        tmp = p + ".tmp"
         try:
-            # Write to temp file first, then rename (atomic)
-            temp_file = state_file + ".tmp"
-            with open(temp_file, "w", encoding="utf-8") as f:
+            with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(state, f, indent=2)
-            # On Windows, rename handles file replacement; on Unix, remove first
-            if os.path.exists(state_file):
-                os.remove(state_file)
-            os.rename(temp_file, state_file)
+            if os.path.exists(p):
+                os.remove(p)
+            os.rename(tmp, p)
         except Exception as exc:
-            logger.error("Could not save scrape state to %s: %s", state_file, exc)
+            logger.error("Could not save scrape state: %s", exc)
 
-    def _is_site_due_for_rescrape(self, supplier_name: str, state: dict, days: int) -> bool:
-        """Return True if supplier should be scraped (not in state or > days old)."""
-        if supplier_name not in state:
-            return True  # Never scraped before
-
+    def _is_due(self, name: str, state: dict) -> bool:
+        if name not in state:
+            return True
         try:
-            last_scrape_str = state[supplier_name]
-            last_scrape = datetime.fromisoformat(last_scrape_str)
-            days_since = (datetime.utcnow() - last_scrape).days
-            if days_since >= days:
-                logger.debug("Supplier %s last scraped %d days ago — due for rescrape",
-                           supplier_name, days_since)
-                return True
-            else:
-                logger.debug("Supplier %s scraped %d days ago — skipping (< %d days)",
-                           supplier_name, days_since, days)
-                return False
-        except Exception as exc:
-            logger.warning("Could not parse timestamp for %s: %s — will scrape", supplier_name, exc)
+            last = datetime.fromisoformat(state[name])
+            return (datetime.utcnow() - last).days >= self.days_before_rescrape
+        except Exception:
             return True
 
-    def _update_scrape_timestamp(self, supplier_name: str, state: dict) -> None:
-        """Record the current UTC time as last-scrape for supplier."""
-        state[supplier_name] = datetime.utcnow().isoformat()
+    # ------------------------------------------------------------------
+    # Supplier loading
+    # ------------------------------------------------------------------
+
+    def _load_supplier_pairs(self, supplier_excel: str) -> list[tuple[str, str]]:
+        try:
+            df = pd.read_excel(supplier_excel, engine="openpyxl")
+        except Exception as exc:
+            logger.error("Cannot read %s: %s", supplier_excel, exc)
+            return []
+
+        df.columns = [str(c).strip() for c in df.columns]
+        name_col = next(
+            (c for c in df.columns if "supplier" in c.lower() and "name" in c.lower()),
+            next((c for c in df.columns if "supplier" in c.lower()), None),
+        )
+        url_col = next(
+            (c for c in df.columns if "website" in c.lower() or "url" in c.lower()),
+            None,
+        )
+        if not name_col or not url_col:
+            logger.error("Cannot find Supplier Name / Website columns in %s", supplier_excel)
+            return []
+
+        pairs = []
+        for _, row in df.iterrows():
+            name = str(row.get(name_col, "")).strip()
+            url = str(row.get(url_col, "")).strip()
+            if not name or name.lower() in ("nan", "", "none") or not url or url.lower() in ("nan", "", "none"):
+                continue
+            if not url.startswith(("http://", "https://")):
+                url = "https://" + url
+            if _validate_url(url):
+                pairs.append((name, url))
+            else:
+                logger.warning("Invalid URL for %s: %s - skipping", name, url)
+
+        logger.info("Loaded %d suppliers from %s", len(pairs), supplier_excel)
+        return pairs
 
     # ------------------------------------------------------------------
     # Public entry point
@@ -236,294 +584,593 @@ class ScraperEngine:
 
     def run(self, supplier_excel: str, output_dir: str) -> dict:
         """
-        Crawl all suppliers listed in *supplier_excel* and save PDFs to
-        *output_dir*.
-
-        The Excel file must have at minimum two columns:
-            - ``Supplier Name``
-            - ``Website``
-
-        Returns a summary dict with keys ``pages``, ``pdfs``, ``suppliers``.
-
-        If skip_recent_sites=True, suppliers scraped less than days_before_rescrape
-        ago are skipped, saving time and bandwidth.
+        Crawl all suppliers.  Per-domain workers run concurrently; requests
+        within each domain are serialised with the configured delay.
         """
         self._stop_event.clear()
         self.page_count = 0
         self.pdf_count = 0
+        self._supplier_pdf_counts.clear()
+        self._warned_pdf_cap.clear()
 
         output_dir = str(output_dir)
         os.makedirs(output_dir, exist_ok=True)
 
-        # Load supplier list
         pairs = self._load_supplier_pairs(supplier_excel)
         if not pairs:
-            logger.warning("No suppliers with valid websites found in %s", supplier_excel)
+            logger.warning("No suppliers found in %s", supplier_excel)
             return {"pages": 0, "pdfs": 0, "suppliers": 0}
 
-        # Load scrape state and filter suppliers if enabled
-        self._scrape_state = self._load_scrape_state(output_dir)
-        original_count = len(pairs)
+        # Guardrail: only crawl vendors that appear in the input CSVs.
+        # No requisition rows = no keywords = nothing relevant to download.
+        if self.supplier_keywords:
+            dropped = sorted(n for n, _ in pairs if n.lower() not in self.supplier_keywords)
+            if dropped:
+                pairs = [(n, u) for n, u in pairs if n.lower() in self.supplier_keywords]
+                logger.warning(
+                    "Skipping %d supplier(s) with no rows in input CSVs: %s",
+                    len(dropped), ", ".join(dropped),
+                )
+            if not pairs:
+                logger.warning("No suppliers match input CSV vendors - nothing to crawl")
+                return {"pages": 0, "pdfs": 0, "suppliers": 0}
 
+        # 7-day freshness filter
+        scrape_state = self._load_scrape_state(output_dir)
+        original_count = len(pairs)
         if self.skip_recent_sites:
-            pairs = [
-                (name, url) for name, url in pairs
-                if self._is_site_due_for_rescrape(name, self._scrape_state, self.days_before_rescrape)
-            ]
+            pairs = [(n, u) for n, u in pairs if self._is_due(n, scrape_state)]
             skipped = original_count - len(pairs)
-            if skipped > 0:
-                logger.info("Skipping %d supplier(s) that were scraped < %d days ago",
-                           skipped, self.days_before_rescrape)
+            if skipped:
+                logger.info("Skipping %d supplier(s) scraped within %d days", skipped, self.days_before_rescrape)
 
         if not pairs:
-            logger.info("All %d suppliers were recently scraped — nothing to do", original_count)
+            logger.info("All suppliers are up to date - nothing to crawl")
             return {"pages": 0, "pdfs": 0, "suppliers": 0}
 
-        logger.info("Starting crawl: %d suppliers (from %d total), batch_size=%d, max_concurrent=%d",
-                    len(pairs), original_count, self.batch_size, self.max_concurrent)
+        # Open shared dedup DB
+        db_path = os.path.join(output_dir, ".scraper_dedup.db")
+        state_db = _StateDB(db_path)
+
+        logger.info(
+            "Starting crawl: %d suppliers | relevance_filter=%s | allowlist_only=%s | web_searcher=%s",
+            len(pairs), self.use_relevance_filter, self.allowlist_only, _HAS_WEB_SEARCHER,
+        )
+
+        # Group suppliers by domain so we build one worker per domain
+        domain_map: dict[str, list[tuple[str, str]]] = {}
+        for name, url in pairs:
+            domain = urlparse(url).netloc
+            domain_map.setdefault(domain, []).append((name, url))
 
         completed = 0
-        _lock = threading.Lock()
+        completed_lock = threading.Lock()
+        threads = []
 
-        for batch_start in range(0, len(pairs), self.batch_size):
+        for domain, domain_pairs in domain_map.items():
             if not self.running:
                 break
+            cfg = _site_cfg(domain, self._site_overrides)
+            t = threading.Thread(
+                target=self._domain_worker,
+                args=(domain, domain_pairs, output_dir, scrape_state, state_db, cfg,
+                      completed_lock, lambda: None),
+                daemon=True,
+                name=f"worker-{domain}",
+            )
+            t.start()
+            threads.append(t)
 
-            batch = pairs[batch_start : batch_start + self.batch_size]
-            batch_num = batch_start // self.batch_size + 1
-            total_batches = (len(pairs) + self.batch_size - 1) // self.batch_size
-            logger.info("Batch %d/%d — suppliers %d-%d",
-                        batch_num, total_batches,
-                        batch_start + 1, batch_start + len(batch))
+        for t in threads:
+            t.join(timeout=600)
+            if t.is_alive():
+                logger.warning("Domain worker %s timed out", t.name)
+            with completed_lock:
+                completed += 1
+            logger.info("Progress: %d/%d domains done", completed, len(domain_map))
 
-            semaphore = threading.Semaphore(self.max_concurrent)
-            threads = []
+        # Save freshness state
+        self._save_scrape_state(scrape_state, output_dir)
+        state_db.close()
 
-            def _crawl(supplier, url):
-                try:
-                    semaphore.acquire()
-                    self.crawl_site(supplier, url, output_dir)
-                except Exception as exc:
-                    logger.error("Unexpected error crawling %s: %s", supplier, exc)
-                finally:
-                    semaphore.release()
-                    nonlocal completed
-                    with _lock:
-                        completed += 1
-                    logger.info("Progress: %d/%d suppliers done", completed, len(pairs))
-
-            for supplier, url in batch:
-                if not self.running:
-                    break
-                t = threading.Thread(target=_crawl, args=(supplier, url), daemon=True)
-                t.start()
-                threads.append(t)
-
-            for t in threads:
-                t.join(timeout=300)
-                if t.is_alive():
-                    logger.warning("Thread timeout — a supplier in this batch is still running")
-
-            if self.running:
-                logger.info("Batch %d/%d complete", batch_num, total_batches)
-            gc.collect()
-
-        # Save updated scrape state
-        if self.skip_recent_sites:
-            self._save_scrape_state(self._scrape_state, output_dir)
-
-        summary = {"pages": self.page_count, "pdfs": self.pdf_count, "suppliers": completed}
-        logger.info("Crawl finished — pages=%d  pdfs=%d  suppliers=%d",
+        summary = {"pages": self.page_count, "pdfs": self.pdf_count, "suppliers": len(pairs)}
+        logger.info("Crawl finished - pages=%d  pdfs=%d  suppliers=%d",
                     summary["pages"], summary["pdfs"], summary["suppliers"])
         return summary
 
     # ------------------------------------------------------------------
-    # Crawling methods (adapted from PDFCrawlerEnhancedApp)
+    # Domain worker - serialises all requests for one domain
     # ------------------------------------------------------------------
 
-    def crawl_site(self, supplier: str, url: str, output_dir: str):
-        """Crawl a single vendor site, downloading all PDFs found."""
-        if not self.running:
-            return
-
-        logger.info("Starting crawl: %s  %s", supplier, url)
-        vendor_folder = os.path.join(output_dir, supplier)
-        os.makedirs(vendor_folder, exist_ok=True)
-
-        supplier_visited: set[str] = set()
-
-        try:
-            success = self._intelligent_crawling(url, supplier, vendor_folder, supplier_visited)
-            if not success:
-                logger.info("Falling back to recursive crawl for %s", supplier)
-                self.crawl_url_recursive(url, vendor_folder, supplier, visited_set=supplier_visited)
-
-            logger.info("Finished %s — %d pages visited", supplier, len(supplier_visited))
-
-            # Update scrape timestamp on successful crawl (at least one page or PDF found)
-            if self.skip_recent_sites and (supplier_visited or self.pdf_count > 0):
-                self._update_scrape_timestamp(supplier, self._scrape_state)
-
-        except Exception as exc:
-            logger.error("Failed to crawl %s: %s", supplier, exc)
-
-    def _intelligent_crawling(
-        self, url: str, supplier: str, vendor_folder: str, supplier_visited: set
-    ) -> bool:
-        """Try robots.txt / sitemap crawling first; return True if it produced PDFs."""
-        try:
-            robots_url = urljoin(url, "/robots.txt")
-            logger.debug("Checking robots.txt for %s", supplier)
+    def _domain_worker(
+        self,
+        domain: str,
+        pairs: list[tuple[str, str]],
+        output_dir: str,
+        scrape_state: dict,
+        state_db: _StateDB,
+        cfg: dict,
+        completed_lock: threading.Lock,
+        on_done,
+    ):
+        """One thread per domain.  Processes all suppliers on that domain in sequence."""
+        session = _make_session(self.page_timeout)
+        for supplier, url in pairs:
+            if not self.running:
+                break
+            vendor_folder = os.path.join(output_dir, supplier)
+            os.makedirs(vendor_folder, exist_ok=True)
             try:
-                resp = self.session.get(robots_url, timeout=10)
-                if resp.status_code == 200:
-                    sitemap_urls = self._extract_sitemap_urls(resp.text, url)
-                    if sitemap_urls:
-                        logger.info("Found %d sitemap(s) for %s", len(sitemap_urls), supplier)
-                        return self._crawl_via_sitemap(sitemap_urls, supplier, vendor_folder, supplier_visited)
+                self._crawl_supplier(supplier, url, domain, vendor_folder,
+                                     session, state_db, cfg)
+                scrape_state[supplier] = datetime.utcnow().isoformat()
             except Exception as exc:
-                logger.debug("Could not read robots.txt for %s: %s", supplier, exc)
+                logger.error("Unhandled error crawling %s: %s", supplier, exc)
 
-            return False
+    # ------------------------------------------------------------------
+    # Per-supplier discovery chain
+    # ------------------------------------------------------------------
+
+    def _crawl_supplier(
+        self,
+        supplier: str,
+        url: str,
+        domain: str,
+        vendor_folder: str,
+        session: requests.Session,
+        state_db: _StateDB,
+        cfg: dict,
+    ):
+        """
+        Discovery order (stops as soon as PDFs are found):
+        1. robots.txt -> sitemap
+        2. /sitemap.xml, /sitemap_index.xml (direct fallbacks)
+        3. filetype:pdf search via DuckDuckGo / Bing
+        4. Recursive link-walk (last resort)
+        """
+        logger.info("[%s] Starting - %s", supplier, url)
+
+        # Keyword filter: check if page contains relevant keywords before crawling
+        if self.use_keyword_filter and self.keywords:
+            if not _check_page_keywords(url, self.keywords, self.page_timeout):
+                logger.info("[%s] Skipping - no relevant keywords found", supplier)
+                return
+
+        found_any = False
+
+        # 1 + 2 - sitemap
+        if cfg["use_sitemap"]:
+            pdf_urls = self._discover_via_sitemap(url, domain, session, cfg)
+            if pdf_urls:
+                for pdf_url in pdf_urls:
+                    if not self.running:
+                        return
+                    self._download_pdf(pdf_url, vendor_folder, supplier, "",
+                                       domain, session, state_db, cfg)
+                found_any = True
+
+        # 3 - search
+        if not found_any and cfg["use_search"] and _HAS_WEB_SEARCHER:
+            pdf_urls = self._discover_via_search(domain, supplier)
+            if pdf_urls:
+                for pdf_url in pdf_urls:
+                    if not self.running:
+                        return
+                    self._download_pdf(pdf_url, vendor_folder, supplier, "",
+                                       domain, session, state_db, cfg)
+                found_any = True
+
+        # 4 - recursive link-walk
+        if not found_any and cfg["use_recursive"]:
+            logger.info("[%s] Falling back to recursive crawl", supplier)
+            visited: set[str] = set()
+            self._crawl_recursive(url, vendor_folder, supplier, domain,
+                                  session, state_db, cfg, visited, depth=0)
+
+        logger.info("[%s] Done - total PDFs so far: %d", supplier, self.pdf_count)
+
+    # ------------------------------------------------------------------
+    # Discovery: sitemap
+    # ------------------------------------------------------------------
+
+    def _discover_via_sitemap(
+        self, base_url: str, domain: str, session: requests.Session, cfg: dict
+    ) -> list[str]:
+        """
+        Try robots.txt first, then common sitemap paths.
+        Returns a flat list of PDF URLs found across all sitemaps.
+        """
+        sitemap_urls: list[str] = []
+
+        # robots.txt
+        try:
+            self._rate_limiter.wait(domain, cfg["delay"])
+            resp = session.get(urljoin(base_url, "/robots.txt"), timeout=10)
+            if resp.status_code == 200:
+                for line in resp.text.splitlines():
+                    line = line.strip()
+                    if line.lower().startswith("sitemap:"):
+                        sitemap_urls.append(line.split(":", 1)[1].strip())
         except Exception as exc:
-            logger.warning("Intelligent crawling failed for %s: %s", supplier, exc)
-            return False
+            logger.debug("[%s] robots.txt: %s", domain, exc)
 
-    def _extract_sitemap_urls(self, robots_content: str, base_url: str) -> list[str]:
-        """Pull Sitemap: lines out of robots.txt."""
-        urls = []
-        for line in robots_content.splitlines():
-            line = line.strip()
-            if line.lower().startswith("sitemap:"):
-                sitemap_url = line.split(":", 1)[1].strip()
-                urls.append(urljoin(base_url, sitemap_url))
-        return urls
+        # Common paths if robots.txt had none
+        if not sitemap_urls:
+            for path in ("/sitemap.xml", "/sitemap_index.xml"):
+                try:
+                    candidate = urljoin(base_url, path)
+                    self._rate_limiter.wait(domain, cfg["delay"])
+                    resp = session.get(candidate, timeout=10)
+                    if resp.status_code == 200 and b"<loc>" in resp.content:
+                        sitemap_urls.append(candidate)
+                        logger.debug("[%s] Found sitemap at %s", domain, path)
+                        break
+                except Exception as exc:
+                    logger.debug("[%s] No sitemap at %s: %s", domain, path, exc)
 
-    def _crawl_via_sitemap(
-        self, sitemap_urls: list, supplier: str, vendor_folder: str, supplier_visited: set
-    ) -> bool:
-        """Download all PDFs referenced in the sitemaps; return True if any found."""
-        pdf_urls = []
+        if not sitemap_urls:
+            return []
+
+        pdf_urls: list[str] = []
         for sitemap_url in sitemap_urls:
             if not self.running:
                 break
             try:
-                resp = self.session.get(sitemap_url, timeout=15)
+                self._rate_limiter.wait(domain, cfg["delay"])
+                resp = session.get(sitemap_url, timeout=15)
                 resp.raise_for_status()
                 soup = BeautifulSoup(resp.content, "xml")
                 for loc in soup.find_all("loc"):
                     href = (loc.text or "").strip()
                     if href.lower().endswith(".pdf"):
                         pdf_urls.append(href)
-                    elif len(supplier_visited) < self.max_pages_per_site:
-                        supplier_visited.add(href)
-                logger.debug("Sitemap %s — %d PDF(s) found", sitemap_url, len(pdf_urls))
+                logger.info("[%s] Sitemap %s -> %d PDF(s)", domain, sitemap_url, len(pdf_urls))
             except Exception as exc:
-                logger.warning("Failed to read sitemap %s: %s", sitemap_url, exc)
+                logger.warning("[%s] Failed to parse sitemap %s: %s", domain, sitemap_url, exc)
 
-        for pdf_url in pdf_urls:
-            if not self.running:
-                break
-            self.download_pdf(pdf_url, vendor_folder, supplier)
+        return pdf_urls
 
-        if pdf_urls:
-            logger.info("Sitemap crawl: %d PDF(s) for %s", len(pdf_urls), supplier)
-            return True
-        return False
+    # ------------------------------------------------------------------
+    # Discovery: search engine
+    # ------------------------------------------------------------------
 
-    def crawl_url_recursive(
+    def _discover_via_search(self, domain: str, supplier: str) -> list[str]:
+        """
+        Query ``site:<domain> filetype:pdf`` via DuckDuckGo then Bing.
+        Never touches the supplier's own site or search box.
+        """
+        query = f"site:{domain} filetype:pdf"
+        pdf_urls: list[str] = []
+
+        try:
+            results = search_duckduckgo(query, timeout=10, max_results=30)
+            pdf_urls = [r for r in results if r.lower().endswith(".pdf") and domain in r]
+            logger.debug("[%s] DuckDuckGo: %d PDF(s)", supplier, len(pdf_urls))
+        except Exception as exc:
+            logger.debug("[%s] DuckDuckGo failed: %s", supplier, exc)
+
+        if not pdf_urls:
+            try:
+                results = search_bing(query, timeout=10, max_results=30)
+                pdf_urls = [r for r in results if r.lower().endswith(".pdf") and domain in r]
+                logger.debug("[%s] Bing: %d PDF(s)", supplier, len(pdf_urls))
+            except Exception as exc:
+                logger.debug("[%s] Bing failed: %s", supplier, exc)
+
+        return pdf_urls
+
+    # ------------------------------------------------------------------
+    # Discovery: recursive link-walk (last resort)
+    # ------------------------------------------------------------------
+
+    def _crawl_recursive(
         self,
         url: str,
         vendor_folder: str,
         supplier: str,
-        visited_set: set | None = None,
-        depth: int = 0,
-        max_depth: int = 2,
+        domain: str,
+        session: requests.Session,
+        state_db: _StateDB,
+        cfg: dict,
+        visited: set,
+        depth: int,
     ):
-        """Recursively follow links, downloading any PDFs encountered."""
-        if visited_set is None:
-            visited_set = set()
+        max_depth = cfg["max_depth"]
+        max_pages = cfg["max_pages"]
 
-        if not self.running or depth > max_depth or url in visited_set:
+        if not self.running or depth > max_depth or url in visited:
             return
         if not _validate_url(url):
-            logger.warning("Blocked unsafe URL: %s", url)
             return
-        if len(visited_set) >= self.max_pages_per_site:
-            logger.warning("Page limit reached for %s, stopping", supplier)
+        if len(visited) >= max_pages:
+            logger.warning("[%s] Page limit (%d) reached", supplier, max_pages)
             return
 
-        visited_set.add(url)
-        self.page_count += 1
+        visited.add(url)
+        with self._count_lock:
+            self.page_count += 1
+
+        if self.verbose:
+            logger.debug("[%s] Visiting (depth %d): %s", supplier, depth, url)
 
         try:
-            time.sleep(self.request_delay)
-            if self.verbose:
-                logger.debug("Visiting: %s (depth %d)", url, depth)
-
-            resp = self.session.get(url, timeout=self.page_timeout)
+            self._rate_limiter.wait(domain, cfg["delay"])
+            resp = session.get(url, timeout=self.page_timeout)
             resp.raise_for_status()
 
             if url.lower().endswith(".pdf"):
-                self.download_pdf(url, vendor_folder, supplier)
+                self._download_pdf(url, vendor_folder, supplier, "",
+                                   domain, session, state_db, cfg)
                 return
 
             soup = BeautifulSoup(resp.content, "html.parser")
-            pdf_links, other_links = [], []
+            pdf_links: list[tuple[str, str]] = []
+            page_links: list[str] = []
 
             for tag in soup.find_all("a", href=True):
                 href = tag["href"].strip()
                 if not href or href.startswith(("#", "mailto:", "tel:")):
                     continue
                 full_url = urljoin(url, href)
-                if urlparse(full_url).netloc != urlparse(url).netloc:
+                if urlparse(full_url).netloc != domain:
                     continue
                 if full_url.lower().endswith(".pdf"):
-                    pdf_links.append(full_url)
-                elif depth < max_depth and full_url not in visited_set:
-                    other_links.append(full_url)
+                    pdf_links.append((full_url, tag.get_text(strip=True)))
+                elif depth < max_depth and full_url not in visited:
+                    page_links.append(full_url)
 
-            for pdf_url in pdf_links:
+            for pdf_url, anchor in pdf_links:
                 if not self.running:
                     return
-                self.download_pdf(pdf_url, vendor_folder, supplier)
+                self._download_pdf(pdf_url, vendor_folder, supplier, anchor,
+                                   domain, session, state_db, cfg)
 
-            for link_url in other_links[:10]:
+            for link in page_links[:10]:
                 if not self.running:
                     return
-                self.crawl_url_recursive(link_url, vendor_folder, supplier, visited_set, depth + 1, max_depth)
+                self._crawl_recursive(link, vendor_folder, supplier, domain,
+                                      session, state_db, cfg, visited, depth + 1)
 
         except requests.exceptions.Timeout:
-            logger.warning("Timeout crawling %s", url)
+            logger.warning("[%s] Timeout: %s", supplier, url)
         except requests.exceptions.RequestException as exc:
-            logger.warning("Request failed for %s: %s", url, exc)
+            logger.warning("[%s] Request failed: %s - %s", supplier, url, exc)
         except Exception as exc:
-            logger.error("Error crawling %s: %s", url, exc)
+            logger.error("[%s] Error crawling %s: %s", supplier, url, exc)
 
-    def download_pdf(self, pdf_url: str, vendor_folder: str, supplier: str):
-        """Download one PDF, enforcing size limits and integrity checks."""
+    # ------------------------------------------------------------------
+    # Relevance filter
+    # ------------------------------------------------------------------
+
+    def _should_download(self, pdf_url: str, anchor: str, supplier: str = "") -> tuple[bool, str]:
+        if not self.use_relevance_filter:
+            return True, "filter_disabled"
+        allowed, reason = _score_pdf_relevance(pdf_url, anchor)
+        if not allowed:
+            return False, reason
+        if self.allowlist_only and reason == "default_allow":
+            return False, "no_allowlist_match"
+
+        # Supplier keyword filter: only download if PDF filename matches
+        # at least one keyword from the supplier's item descriptions.
+
+        if self.supplier_keywords and supplier:
+            supplier_lower = supplier.lower()
+
+            if supplier_lower not in self.supplier_keywords:
+                # Fail closed: keyword filtering is on but this supplier has no
+                # item descriptions, so nothing can be judged relevant.
+                if supplier_lower not in self._warned_no_kw:
+                    self._warned_no_kw.add(supplier_lower)
+                    logger.warning("[%s] No supplier keywords loaded - skipping all PDFs", supplier)
+                return False, "no_supplier_keywords"
+
+            # Match against the full URL path + link text, not just the
+            # filename - product identity often lives in the folder path
+            # ("/products/mx-500/datasheet.pdf") or the anchor text.
+            path = urlparse(pdf_url).path
+            if '.' in path.rsplit('/', 1)[-1]:
+                path = path.rsplit('.', 1)[0]
+
+            # Normalize: lowercase, separators to spaces
+            search_text = f"{path} {anchor}".lower()
+            for sep in ('/', '-', '_'):
+                search_text = search_text.replace(sep, ' ')
+
+            if not _keywords_match(self.supplier_keywords[supplier_lower], search_text):
+                return False, "no_keyword_match"
+
+        return True, reason
+
+    def _content_relevant(self, file_path: str, supplier: str) -> bool:
+        """First-page text check: at least one supplier keyword must appear.
+
+        Fails open when keywords, pdfplumber, or a text layer are missing -
+        scanned PDFs and extraction errors are judged later by cross-reference.
+        """
+        keywords = self.supplier_keywords.get(supplier.lower())
+        if not keywords:
+            return True
+        try:
+            import pdfplumber
+            with pdfplumber.open(file_path) as pdf:
+                text = (pdf.pages[0].extract_text() or "") if pdf.pages else ""
+        except Exception:
+            return True
+        if not text.strip():
+            return True  # no text layer (scanned PDF) - cannot judge here
+        text = text.lower().replace('-', ' ').replace('_', ' ')
+        return _keywords_match(keywords, text)
+
+    # ------------------------------------------------------------------
+    # Download
+    # ------------------------------------------------------------------
+
+    def _download_pdf(
+        self,
+        pdf_url: str,
+        vendor_folder: str,
+        supplier: str,
+        anchor: str,
+        domain: str,
+        session: requests.Session,
+        state_db: _StateDB,
+        cfg: dict,
+    ):
         if not self.running:
             return
-        if not _validate_url(pdf_url):
-            logger.warning("Blocked unsafe PDF URL: %s", pdf_url)
+        if self._supplier_pdf_counts[supplier] >= cfg["max_pdfs_per_supplier"]:
+            if supplier not in self._warned_pdf_cap:
+                self._warned_pdf_cap.add(supplier)
+                logger.warning("[%s] Per-supplier PDF cap (%d) reached - skipping "
+                               "further downloads (generic keyword slipping through?)",
+                               supplier, cfg["max_pdfs_per_supplier"])
             return
+        if not _validate_url(pdf_url):
+            logger.warning("[%s] Blocked unsafe URL: %s", supplier, pdf_url)
+            return
+
+        # Relevance - no network cost
+        ok, reason = self._should_download(pdf_url, anchor, supplier)
+        if not ok:
+            logger.debug("[%s] Skipping (%s): %s", supplier, reason, pdf_url)
+            return
+
+        # Dedup - skip if already seen
+        if state_db.is_seen(pdf_url):
+            logger.debug("[%s] Already processed: %s", supplier, pdf_url)
+            return
+        state_db.mark_seen(pdf_url, "queued")
 
         filename = _sanitize_path(os.path.basename(urlparse(pdf_url).path))
         if not filename.lower().endswith(".pdf"):
             filename += ".pdf"
-        if not filename or len(filename) < 5:
+        if len(filename) < 5:
             filename = f"document_{int(time.time())}.pdf"
 
         file_path = os.path.join(vendor_folder, filename)
-        if os.path.exists(file_path):
-            if self.verbose:
-                logger.debug("Already downloaded: %s", filename)
+
+        # Dedup by path
+        if state_db.is_downloaded(file_path) or os.path.exists(file_path):
+            logger.debug("[%s] Already downloaded: %s", supplier, filename)
+            state_db.update_status(pdf_url, "exists")
             return
 
         try:
-            resp = self.session.get(pdf_url, timeout=self.page_timeout, stream=True)
+            max_bytes = self.max_pdf_size_mb * 1024 * 1024
+
+            # HEAD pre-check before streaming
+            try:
+                self._rate_limiter.wait(domain, cfg["delay"])
+                head = session.head(pdf_url, timeout=10, allow_redirects=True)
+                cl = head.headers.get("content-length")
+                ct = head.headers.get("content-type", "").lower()
+
+                if cl and int(cl) > max_bytes:
+                    logger.warning("[%s] Too large (HEAD): %.1f MB - %s",
+                                   supplier, int(cl) / 1024 / 1024, pdf_url)
+                    state_db.update_status(pdf_url, "skipped_size")
+                    return
+
+                if self.strict_content_validation and "pdf" not in ct and not pdf_url.lower().endswith(".pdf"):
+                    logger.warning("[%s] Non-PDF content-type (HEAD): %s", supplier, ct)
+                    state_db.update_status(pdf_url, "skipped_type")
+                    return
+            except Exception as exc:
+                logger.debug("[%s] HEAD failed for %s: %s - proceeding with GET", supplier, pdf_url, exc)
+
+            # Full download
+            self._rate_limiter.wait(domain, cfg["delay"])
+            resp = session.get(pdf_url, timeout=self.page_timeout, stream=True)
             resp.raise_for_status()
 
-            content_type = resp.headers.get("content-type", "").lower()
-            content_length = resp.headers.get("content-length")
-            max_byt
+            ct = resp.headers.get("content-type", "").lower()
+            cl = resp.headers.get("content-length")
+
+            if cl and int(cl) > max_bytes:
+                logger.warning("[%s] Too large: %.1f MB - %s",
+                               supplier, int(cl) / 1024 / 1024, pdf_url)
+                state_db.update_status(pdf_url, "skipped_size")
+                return
+
+            if self.strict_content_validation and "pdf" not in ct and not pdf_url.lower().endswith(".pdf"):
+                state_db.update_status(pdf_url, "skipped_type")
+                return
+
+            # Peek at the first chunk: reject HTML error/login pages served
+            # at .pdf URLs before anything touches disk. PDF spec allows the
+            # magic bytes anywhere in the first 1024 bytes.
+            stream = resp.iter_content(chunk_size=8192)
+            first = next(stream, b"")
+            if b"%PDF" not in first[:1024]:
+                logger.warning("[%s] Not a PDF payload - skipped: %s", supplier, pdf_url)
+                state_db.update_status(pdf_url, "rejected_not_pdf")
+                return
+
+            downloaded = len(first)
+            with open(file_path, "wb") as f:
+                f.write(first)
+                for chunk in stream:
+                    if not self.running:
+                        try:
+                            os.remove(file_path)
+                        except Exception:
+                            pass
+                        return
+                    downloaded += len(chunk)
+                    if downloaded > max_bytes:
+                        try:
+                            os.remove(file_path)
+                        except Exception:
+                            pass
+                        logger.warning("[%s] Exceeded size mid-download - removed: %s", supplier, filename)
+                        state_db.update_status(pdf_url, "skipped_size")
+                        return
+                    f.write(chunk)
+
+            actual = os.path.getsize(file_path)
+            if actual < self.min_pdf_size_bytes:
+                os.remove(file_path)
+                logger.warning("[%s] File too small (%d bytes) - removed: %s", supplier, actual, filename)
+                state_db.update_status(pdf_url, "skipped_small")
+                return
+
+            # Same catalog PDF often served at several URLs - keep one copy
+            file_hash = _file_hash(file_path)
+            if file_hash and state_db.is_hash_seen(file_hash):
+                os.remove(file_path)
+                logger.info("[%s] Duplicate content - removed: %s", supplier, filename)
+                state_db.update_status(pdf_url, "duplicate")
+                return
+
+            if not self._content_relevant(file_path, supplier):
+                os.remove(file_path)
+                logger.info("[%s] First page has no supplier keywords - removed: %s",
+                            supplier, filename)
+                state_db.update_status(pdf_url, "rejected_content")
+                return
+
+            state_db.mark_downloaded(file_path, pdf_url, supplier)
+            if file_hash:
+                state_db.mark_hash(file_hash)
+            state_db.update_status(pdf_url, "downloaded")
+            with self._count_lock:
+                self.pdf_count += 1
+                self._supplier_pdf_counts[supplier] += 1
+            logger.info("[%s] Downloaded: %s (%.1f MB) [%s]",
+                        supplier, filename, actual / 1024 / 1024, reason)
+
+        except requests.exceptions.Timeout:
+            logger.warning("[%s] Timeout downloading %s", supplier, pdf_url)
+            state_db.update_status(pdf_url, "timeout")
+        except requests.exceptions.RequestException as exc:
+            logger.warning("[%s] Download failed %s: %s", supplier, pdf_url, exc)
+            state_db.update_status(pdf_url, "error")
+        except Exception as exc:
+            logger.error("[%s] Unexpected error %s: %s", supplier, pdf_url, exc)
+            state_db.update_status(pdf_url, "error")
+            try:
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+            except Exception:
+                pass

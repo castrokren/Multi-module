@@ -1,6 +1,9 @@
 import time
 import requests
 from bs4 import BeautifulSoup
+import logging
+
+logger = logging.getLogger("supplier_resolution")
 
 HEADERS = {
     "User-Agent": (
@@ -18,7 +21,7 @@ def search_duckduckgo(query: str, timeout: int = 10,
         url = "https://html.duckduckgo.com/html/"
         params = {"q": query}
         resp = requests.post(url, data=params, headers=HEADERS,
-                             timeout=timeout)
+                             timeout=(5, timeout))
         resp.raise_for_status()
         soup = BeautifulSoup(resp.text, "html.parser")
         results = []
@@ -29,7 +32,14 @@ def search_duckduckgo(query: str, timeout: int = 10,
             if len(results) >= max_results:
                 break
         return results
-    except Exception:
+    except requests.exceptions.Timeout:
+        logger.warning("DuckDuckGo search timeout for query: %s", query)
+        return []
+    except requests.exceptions.RequestException as e:
+        logger.warning("DuckDuckGo search failed for query: %s - %s", query, e)
+        return []
+    except Exception as e:
+        logger.error("DuckDuckGo search error for query: %s - %s", query, e)
         return []
 
 
@@ -40,7 +50,7 @@ def search_bing(query: str, timeout: int = 10,
         url = "https://www.bing.com/search"
         params = {"q": query}
         resp = requests.get(url, params=params, headers=HEADERS,
-                            timeout=timeout)
+                            timeout=(5, timeout))
         resp.raise_for_status()
         soup = BeautifulSoup(resp.text, "html.parser")
         results = []
@@ -53,7 +63,14 @@ def search_bing(query: str, timeout: int = 10,
             if len(results) >= max_results:
                 break
         return results
-    except Exception:
+    except requests.exceptions.Timeout:
+        logger.warning("Bing search timeout for query: %s", query)
+        return []
+    except requests.exceptions.RequestException as e:
+        logger.warning("Bing search failed for query: %s - %s", query, e)
+        return []
+    except Exception as e:
+        logger.error("Bing search error for query: %s - %s", query, e)
         return []
 
 
@@ -65,8 +82,15 @@ def find_supplier_url(supplier_name: str, delay: float = 1.5,
     Applies delay between requests to avoid rate limiting.
     """
     query = f'"{supplier_name}" official website'
-    ddg_urls = search_duckduckgo(query, timeout=timeout)
-    time.sleep(delay)
-    bing_urls = search_bing(query, timeout=timeout)
-    time.sleep(delay)
-    return ddg_urls, bing_urls
+    logger.info("Searching for supplier: %s", supplier_name)
+    try:
+        ddg_urls = search_duckduckgo(query, timeout=timeout)
+        time.sleep(delay)
+        bing_urls = search_bing(query, timeout=timeout)
+        time.sleep(delay)
+        logger.info("Found %d DuckDuckGo results, %d Bing results for %s",
+                    len(ddg_urls), len(bing_urls), supplier_name)
+        return ddg_urls, bing_urls
+    except Exception as e:
+        logger.error("Unhandled error searching for %s: %s", supplier_name, e)
+        return [], []

@@ -82,22 +82,22 @@ class AdaptiveExcelProcessor:
     def load_keywords(self, hw_file, sw_file, ni_file=None):
         """Load hardware, software, and non-instrument keywords from files."""
         try:
-            hw_content = Path(hw_file).read_text()
-            sw_content = Path(sw_file).read_text()
-            
+            hw_content = Path(hw_file).read_text(encoding='utf-8')
+            sw_content = Path(sw_file).read_text(encoding='utf-8')
+
             # Filter out commented lines and empty lines
             self.hw_keywords = [
-                l.strip().lower() for l in hw_content.splitlines() 
+                l.strip().lower() for l in hw_content.splitlines()
                 if l.strip() and not l.strip().startswith('#')
             ]
             self.sw_keywords = [
-                l.strip().lower() for l in sw_content.splitlines() 
+                l.strip().lower() for l in sw_content.splitlines()
                 if l.strip() and not l.strip().startswith('#')
             ]
-            
+
             # Load non-instrument keywords if file provided
             if ni_file:
-                ni_content = Path(ni_file).read_text()
+                ni_content = Path(ni_file).read_text(encoding='utf-8')
                 self.ni_keywords = [
                     l.strip().lower() for l in ni_content.splitlines() 
                     if l.strip() and not l.strip().startswith('#')
@@ -144,9 +144,13 @@ class AdaptiveExcelProcessor:
 
     def extract_keywords_from_description(self, description):
         """Enhanced keyword extraction with better filtering."""
-        if not description:
+        if not description or pd.isna(description):
             return []
-        
+
+        # Ensure description is a string
+        if not isinstance(description, str):
+            description = str(description)
+
         # Clean the description
         desc_clean = description.lower()
         
@@ -174,6 +178,8 @@ class AdaptiveExcelProcessor:
 
     def calculate_keyword_confidence(self, keyword, description):
         """Calculate confidence score for a potential keyword."""
+        if not isinstance(description, str):
+            description = str(description)
         desc_lower = description.lower()
         confidence = 1.0
         
@@ -238,14 +244,25 @@ class AdaptiveExcelProcessor:
         if path.name.startswith('~$') or path.stem.endswith('_labeled'):
             return False
             
-        return path.suffix.lower() in ['.xls', '.xlsx']
+        return path.suffix.lower() in ['.xls', '.xlsx', '.csv']
 
     def read_excel_file(self, file_path):
-        """Read Excel file with appropriate engine based on extension."""
+        """Read Excel or CSV file with appropriate engine based on extension."""
         file_path = Path(file_path)
         file_ext = file_path.suffix.lower()
-        
-        if file_ext == '.xls':
+
+        if file_ext == '.csv':
+            # Detect CSV encoding
+            try:
+                import chardet
+                with open(file_path, 'rb') as f:
+                    raw = f.read(10000)
+                result = chardet.detect(raw)
+                encoding = result.get('encoding', 'utf-8') or 'utf-8'
+            except Exception:
+                encoding = 'utf-8'
+            return pd.read_csv(file_path, encoding=encoding)
+        elif file_ext == '.xls':
             engine = 'xlrd'
         elif file_ext == '.xlsx':
             engine = 'openpyxl'
@@ -253,7 +270,7 @@ class AdaptiveExcelProcessor:
             raise ValueError(f"Unsupported file format: {file_ext}")
         
         try:
-            df = pd.read_excel(file_path, header=1, engine=engine)
+            df = pd.read_excel(file_path, header=0, engine=engine)
             logging.info(f"Successfully read {file_path.name} using {engine} engine")
             return df
         except Exception as e:
@@ -294,9 +311,13 @@ class AdaptiveExcelProcessor:
     
     def classify_by_vendor(self, vendor_name):
         """Classify item based on vendor name."""
-        if not vendor_name:
+        if not vendor_name or pd.isna(vendor_name):
             return None
-            
+
+        # Ensure vendor_name is a string
+        if not isinstance(vendor_name, str):
+            vendor_name = str(vendor_name)
+
         vendor_lower = vendor_name.lower()
         
         # Check each category's vendor keywords
@@ -313,15 +334,19 @@ class AdaptiveExcelProcessor:
 
     def classify_item(self, description, vendor=None):
         """Classify item based on description and vendor with three-category system."""
-        if not description:
+        if not description or pd.isna(description):
             return "Unknown"
-            
+
+        # Ensure description is a string
+        if not isinstance(description, str):
+            description = str(description)
+
         desc_lower = description.lower()
         
         # STRONG vendor-based classification (highest priority)
         vendor_classification = self.classify_by_vendor(vendor)
         if vendor_classification:
-            logging.debug(f"Vendor-based classification: '{vendor}' → {vendor_classification}")
+            logging.debug(f"Vendor-based classification: '{vendor}' -> {vendor_classification}")
             # Learn from vendor classification
             if self.learning_mode:
                 category = 'hw' if vendor_classification == "Research Instrument" else \
@@ -426,17 +451,17 @@ class AdaptiveExcelProcessor:
         
         if self.hw_keywords_file and self.hw_keywords_file.exists():
             backup_hw = backup_dir / f"hardware_keywords_backup_{timestamp}.txt"
-            backup_hw.write_text(self.hw_keywords_file.read_text())
+            backup_hw.write_text(self.hw_keywords_file.read_text(encoding='utf-8'), encoding='utf-8')
             logging.info(f"Backed up hardware keywords to {backup_hw}")
-        
+
         if self.sw_keywords_file and self.sw_keywords_file.exists():
             backup_sw = backup_dir / f"software_keywords_backup_{timestamp}.txt"
-            backup_sw.write_text(self.sw_keywords_file.read_text())
+            backup_sw.write_text(self.sw_keywords_file.read_text(encoding='utf-8'), encoding='utf-8')
             logging.info(f"Backed up software keywords to {backup_sw}")
-        
+
         if self.ni_keywords_file and self.ni_keywords_file.exists():
             backup_ni = backup_dir / f"non_instrument_keywords_backup_{timestamp}.txt"
-            backup_ni.write_text(self.ni_keywords_file.read_text())
+            backup_ni.write_text(self.ni_keywords_file.read_text(encoding='utf-8'), encoding='utf-8')
             logging.info(f"Backed up non-instrument keywords to {backup_ni}")
 
     def promote_candidate_keywords(self, min_occurrences=None):
@@ -492,7 +517,7 @@ class AdaptiveExcelProcessor:
     def _save_keywords(self, file_path, keywords):
         """Save keywords to file."""
         try:
-            with open(file_path, 'w') as f:
+            with open(file_path, 'w', encoding='utf-8') as f:
                 f.write('\n'.join(sorted(keywords)))
             logging.info(f"Updated {file_path}")
         except Exception as e:
@@ -546,7 +571,7 @@ Learning Progress:
 - Software candidates: {analytics['sw_learning_rate']}
 - Non-Instrument candidates: {analytics['ni_learning_rate']}
 
-Ready for Promotion (≥{self.min_occurrences} occurrences):
+Ready for Promotion (>={self.min_occurrences} occurrences):
 - Instruments: {len(analytics['promotion_candidates']['hw'])} candidates
 - Software: {len(analytics['promotion_candidates']['sw'])} candidates
 - Non-Instruments: {len(analytics['promotion_candidates']['ni'])} candidates
@@ -588,7 +613,12 @@ Top Instrument Candidates:
             desc_col = self.find_description_column(df)
             supplier_col = self.find_supplier_column(df)
             df = self.clean_dataframe(df)
-            
+
+            # Ensure description and supplier columns are strings
+            df[desc_col] = df[desc_col].astype(str)
+            if supplier_col and supplier_col in df.columns:
+                df[supplier_col] = df[supplier_col].astype(str)
+
             # Classify items using both description and supplier (learning happens here)
             if supplier_col and supplier_col in df.columns:
                 # Use both description and supplier for classification
@@ -623,15 +653,17 @@ Top Instrument Candidates:
             return True
             
         except Exception as e:
+            import traceback
             logging.error(f"Error processing {file_path}: {e}")
+            logging.error(f"Traceback: {traceback.format_exc()}")
             return False
 
     def process_directory(self, directory_path, auto_promote=True, min_occurrences=None, test_mode=False):
-        """Process all Excel files in a directory."""
+        """Process all Excel and CSV files in a directory."""
         directory = Path(directory_path)
         processed_count = 0
-        
-        for pattern in ['*.xls', '*.xlsx']:
+
+        for pattern in ['*.xls', '*.xlsx', '*.csv']:
             for file_path in directory.glob(pattern):
                 if self.process_file(file_path, auto_promote=False, min_occurrences=min_occurrences, test_mode=test_mode):
                     processed_count += 1

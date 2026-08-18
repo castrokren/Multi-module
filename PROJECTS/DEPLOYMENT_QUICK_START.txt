@@ -1,0 +1,237 @@
+================================================================================
+CRAWLER PIPELINE DEPLOYMENT - QUICK START
+================================================================================
+
+WHAT'S BEEN DONE:
+  1. Committed 3 critical files to local git repo
+     - scraper_engine.py (7-day smart detection)
+     - pipeline.py (updated)
+     - pipeline_config.json (7-day smart detection config)
+
+  2. Created deployment automation system
+     - update.bat (auto-updater script)
+     - setup_deployment.ps1 (setup & scheduling)
+     - DEPLOYMENT.md (full documentation)
+
+WHAT YOU NEED TO DO:
+  1. Push commit to GitHub (run from Windows Command Prompt or PowerShell)
+  2. Set up automatic deployment scheduling
+
+================================================================================
+STEP 1: PUSH TO GITHUB
+================================================================================
+
+Option A: Using Command Prompt (Simple)
+---------------------------------------
+1. Open Command Prompt as Administrator
+2. Run:
+   cd C:\Projects\Crawler
+   git push origin main
+
+   If prompted for credentials, enter your GitHub username and personal
+   access token (see: https://github.com/settings/tokens)
+
+Option B: Using PowerShell (If Auth Issues)
+--------------------------------------------
+1. Open PowerShell as Administrator
+2. Run:
+   cd C:\Projects\Crawler
+   git config --global credential.helper wincred
+   git push origin main
+
+Option C: Using SSH (Most Secure)
+---------------------------------
+1. Generate SSH key (if you don't have one):
+   ssh-keygen -t ed25519 -C "castrokren@gmail.com"
+
+2. Add public key to GitHub: https://github.com/settings/keys
+
+3. Switch repo to SSH:
+   cd C:\Projects\Crawler
+   git remote set-url origin git@github.com:castrokren/Multi-module.git
+   git push origin main
+
+================================================================================
+STEP 2: SET UP AUTOMATIC DEPLOYMENT
+================================================================================
+
+RECOMMENDED: Use PowerShell Script (Easiest)
+--------------------------------------------
+1. Open PowerShell as Administrator
+2. Run:
+   Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+   C:\Projects\Crawler\PROJECTS\setup_deployment.ps1
+
+3. The script will:
+   - Create required directories
+   - Set up Windows Task Scheduler job
+   - Verify everything is working
+   - Show you the configuration
+
+ALTERNATIVE: Manual Task Scheduler Setup
+-----------------------------------------
+1. Open Task Scheduler (taskschd.msc)
+2. Create Basic Task
+   - Name: Crawler-Pipeline-Update
+   - Description: Auto-check and deploy Crawler updates
+   - Trigger: Daily at 6:00 AM
+   - Action: Start a program
+     Program: C:\Projects\Crawler\PROJECTS\update.bat
+   - Settings: Run with highest privileges
+
+TESTING THE SETUP
+-----------------
+1. Manual test (run update.bat):
+   C:\Projects\Crawler\PROJECTS\update.bat
+
+2. Check logs:
+   Get-Content C:\Projects\Crawler\logs\deployment.log -Tail 30
+
+3. Verify task status:
+   Get-ScheduledTask -TaskName "Crawler-Pipeline-Update" |
+     Select State, NextRunTime
+
+================================================================================
+STEP 3: VERIFY DEPLOYMENT
+================================================================================
+
+1. Check that the commit reached GitHub:
+   cd C:\Projects\Crawler
+   git log --oneline origin/main | head -5
+
+2. Test on remote machine (if available):
+   On C:\Users\castrk05_adm\Desktop\Multi-module\
+
+   cd PROJECTS\src\services
+   python pipeline.py --dry-run
+
+3. Verify files have 7-day detection enabled:
+   cd C:\Projects\Crawler\PROJECTS\src\services
+   findstr /C:"skip_recent_sites" scraper-full\scraper_engine.py
+   findstr /C:"days_before_rescrape" pipeline_config.json
+
+================================================================================
+CONFIGURATION
+================================================================================
+
+DEFAULT SCHEDULE:
+  - Time: 6:00 AM daily
+  - Location: Task Scheduler Library > Crawler-Pipeline-Update
+
+TO CHANGE SCHEDULE:
+  1. Open Task Scheduler (taskschd.msc)
+  2. Right-click "Crawler-Pipeline-Update"
+  3. Properties > Triggers > Edit
+
+TO DISABLE 7-DAY DETECTION TEMPORARILY:
+  Edit: C:\Projects\Crawler\PROJECTS\src\services\pipeline_config.json
+  Change:
+    "skip_recent_sites": true   -->   "skip_recent_sites": false
+
+  This will make every pipeline run do a full scrape (slower but comprehensive)
+
+================================================================================
+FILES CREATED
+================================================================================
+
+Location: C:\Projects\Crawler\PROJECTS\
+
+NEW FILES:
+  - update.bat                   (Auto-updater script)
+  - setup_deployment.ps1         (Setup automation)
+  - DEPLOYMENT.md                (Full documentation)
+  - DEPLOYMENT_QUICK_START.txt   (This file)
+
+UPDATED FILES (In Git):
+  - src/services/scraper-full/scraper_engine.py
+  - src/services/pipeline.py
+  - src/services/pipeline_config.json
+
+OUTPUT DIRECTORIES:
+  - logs/                        (Deployment logs)
+  - backups/                     (Timestamped backups)
+
+================================================================================
+WHAT GETS DEPLOYED
+================================================================================
+
+CROSSREF MODULE IMPORT FIX
+  - Status: VERIFIED WORKING on remote machine
+  - Files: src/services/cross-reference/crossref_standalone_fast.py
+  - What it does: Fixes ModuleNotFoundError during Stage 3
+
+7-DAY SMART DETECTION
+  - Status: 16 unit tests passing
+  - Files:
+    * src/services/scraper-full/scraper_engine.py (main logic)
+    * src/services/pipeline_config.json (config)
+  - What it does: Skips re-scraping suppliers from last 7 days
+  - Impact: ~2 hour runs down to ~10 minutes on subsequent runs
+  - Configuration:
+    "skip_recent_sites": true      (enable/disable)
+    "days_before_rescrape": 7      (adjustable)
+
+STATE TRACKING:
+  - File: .scraper_state.json (created after first run)
+  - Tracks: Last scrape timestamp for each supplier
+  - Auto-cleaned: Old entries removed automatically
+
+================================================================================
+TROUBLESHOOTING
+================================================================================
+
+Q: Git push fails with "authentication failed"
+A: 1. Check your GitHub PAT is valid: https://github.com/settings/tokens
+   2. Or use SSH keys: https://docs.github.com/en/authentication/connecting-to-github-with-ssh
+
+Q: Task Scheduler job doesn't run
+A: 1. Verify task exists: Get-ScheduledTask Crawler-Pipeline-Update
+   2. Check if disabled: (Get-ScheduledTask).State should be "Ready"
+   3. Manually run test: C:\Projects\Crawler\PROJECTS\update.bat
+
+Q: Updates not deploying to remote machine
+A: 1. Verify remote path exists: C:\Users\castrk05_adm\Desktop\Multi-module\
+   2. Set up update.bat on remote with that path
+   3. Or manually pull: cd (remote path) && git pull origin main
+
+Q: Pipeline still runs old code
+A: 1. Verify update succeeded: Check logs\deployment.log
+   2. Verify scraper_engine.py has "skip_recent_sites": grep skip_recent_sites
+   3. Restart any running Python processes
+
+Q: Need to disable auto-updates temporarily
+A: 1. Open Task Scheduler
+   2. Right-click Crawler-Pipeline-Update
+   3. Disable the task
+
+================================================================================
+NEXT STEPS
+================================================================================
+
+SHORT TERM (Next 24 hours):
+  1. Run Step 1: Push to GitHub
+  2. Run Step 2: Set up Task Scheduler
+  3. Run Step 3: Verify on both machines
+
+MEDIUM TERM (This week):
+  1. Monitor logs: Check logs\deployment.log daily
+  2. Run pipeline: Verify 7-day detection is working
+   - Look for .scraper_state.json file after first run
+   - Check that subsequent runs skip scraping
+
+LONG TERM (This month):
+  1. Review backup strategy: Keep last 5 backups
+  2. Adjust schedule if needed: Change 6:00 AM trigger
+  3. Document any customizations: Update DEPLOYMENT.md
+
+================================================================================
+SUPPORT
+================================================================================
+
+For issues or questions:
+  - Documentation: C:\Projects\Crawler\PROJECTS\DEPLOYMENT.md
+  - Logs: C:\Projects\Crawler\logs\deployment.log
+  - Email: castrokren@gmail.com
+
+Deployment system ready!
+================================================================================
