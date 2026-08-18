@@ -30,8 +30,11 @@ All crawling goes through `src/services/scraper-full/scraper_engine.py` —
 the pipeline, the GUI, and `pdf_discovery_pipeline.py` all use it. Do NOT
 add a second download path; the engine owns the accuracy guardrails:
 only CSV-listed vendors crawled, fail-closed supplier keyword filter,
-allowlist/blocklist, `%PDF` magic-byte check, first-page content check,
-content-hash dedup.
+allowlist/blocklist, same-domain enforcement (`_same_site()` — exact host,
+subdomain, or per-vendor `allowed_hosts` override in the site config;
+checked in `_download_pdf` regardless of which discovery path found the
+URL), `%PDF` magic-byte check, first-page content check, content-hash
+dedup.
 
 Automatic runs: `src/services/watch_input.py` watches the input dir and
 runs `pipeline.py` on new files. Ops/setup guide: `docs/RUNBOOK.md`.

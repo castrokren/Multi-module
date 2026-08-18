@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-from scraper_engine import _validate_url, _sanitize_path, _file_hash, _score_pdf_relevance
+from scraper_engine import _validate_url, _sanitize_path, _file_hash, _score_pdf_relevance, _same_site
 
 
 class TestValidateUrl:
@@ -135,3 +135,40 @@ class TestRelevanceFilter:
     def test_blocklist_beats_allowlist_anchor(self):
         ok, _ = _score_pdf_relevance("https://acme.com/invoice.pdf", "product catalog")
         assert ok is False
+
+
+class TestSameSite:
+    def test_exact_host_match(self):
+        assert _same_site("https://acme.com/doc.pdf", "acme.com") is True
+
+    def test_subdomain_is_same_site(self):
+        assert _same_site("https://cdn.acme.com/doc.pdf", "acme.com") is True
+        assert _same_site("https://docs.assets.acme.com/doc.pdf", "acme.com") is True
+
+    def test_www_prefix_ignored_both_directions(self):
+        assert _same_site("https://www.acme.com/doc.pdf", "acme.com") is True
+        assert _same_site("https://acme.com/doc.pdf", "www.acme.com") is True
+
+    def test_rejects_unrelated_domain(self):
+        assert _same_site("https://evil.com/doc.pdf", "acme.com") is False
+
+    def test_rejects_domain_as_substring_only(self):
+        # "acme.com" appears in the string but is not the actual host -
+        # a naive `"acme.com" in url` check would wrongly allow this.
+        assert _same_site("https://evil.com/acme.com/doc.pdf", "acme.com") is False
+        assert _same_site("https://acme.com.evil.com/doc.pdf", "acme.com") is False
+
+    def test_rejects_lookalike_suffix(self):
+        # "notacme.com" ends with "acme.com" as a raw string but is a
+        # different registrable domain.
+        assert _same_site("https://notacme.com/doc.pdf", "acme.com") is False
+
+    def test_allowed_hosts_override(self):
+        assert _same_site("https://cdn.other-host.com/doc.pdf", "acme.com") is False
+        assert _same_site(
+            "https://cdn.other-host.com/doc.pdf", "acme.com",
+            allowed_hosts=("cdn.other-host.com",),
+        ) is True
+
+    def test_invalid_url_rejected(self):
+        assert _same_site("not a url", "acme.com") is False

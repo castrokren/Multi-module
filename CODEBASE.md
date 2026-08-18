@@ -40,7 +40,12 @@ Crawls supplier websites and downloads PDFs:
 - Reads supplier list from Excel
 - HTTP requests with rate limiting (configurable delay)
 - BeautifulSoup-based HTML parsing
-- PDF validation (size, content)
+- Same-domain enforcement on every download (`_same_site()`): candidate PDF
+  URLs must resolve to the vendor's own domain, a subdomain of it, or a
+  host explicitly allow-listed per-vendor (for vendor-run CDNs); enforced
+  centrally in `_download_pdf` so it applies uniformly to sitemap, search,
+  and recursive-crawl discovery alike
+- PDF validation (size, `%PDF` magic-byte content check)
 - Deduplication by file hash (SHA-256)
 - Concurrent crawling (configurable workers, default 3)
 - Timeout protection and retry logic

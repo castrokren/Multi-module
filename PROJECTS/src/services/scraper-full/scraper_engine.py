@@ -205,6 +205,27 @@ def _validate_url(url: str) -> bool:
         return False
 
 
+def _same_site(url: str, domain: str, allowed_hosts: tuple[str, ...] = ()) -> bool:
+    """True if ``url`` belongs to the vendor's site: exact host match, a
+    subdomain of it, or explicitly allow-listed (for vendor-operated CDNs
+    on an unrelated domain, configured per-vendor via ``allowed_hosts`` in
+    the site config). Applied uniformly regardless of which discovery path
+    (sitemap / search / recursive walk) found the URL.
+    """
+    try:
+        host = urlparse(url).netloc.split(":")[0].lower()
+    except Exception:
+        return False
+
+    def _strip_www(h: str) -> str:
+        return h[4:] if h.startswith("www.") else h
+
+    h, d = _strip_www(host), _strip_www(domain.lower())
+    if h == d or h.endswith("." + d):
+        return True
+    return host in allowed_hosts or h in allowed_hosts
+
+
 def _sanitize_path(path: str) -> str:
     path = path.replace("..", "").replace("/", "_").replace("\\", "_")
     for ch in '<>:"|?*':
@@ -364,6 +385,9 @@ DEFAULT_SITE_CONFIG = {
     "use_search": True,     # attempt filetype:pdf search discovery
     "use_recursive": True,  # fall back to recursive link-walking
     "max_depth": 2,         # recursive crawl depth
+    "allowed_hosts": [],    # extra hosts (e.g. a vendor's CDN) treated as
+                            # same-site even though they don't share the
+                            # vendor's domain
 }
 
 
@@ -844,7 +868,7 @@ class ScraperEngine:
 
         try:
             results = search_duckduckgo(query, timeout=10, max_results=30)
-            pdf_urls = [r for r in results if r.lower().endswith(".pdf") and domain in r]
+            pdf_urls = [r for r in results if r.lower().endswith(".pdf") and _same_site(r, domain)]
             logger.debug("[%s] DuckDuckGo: %d PDF(s)", supplier, len(pdf_urls))
         except Exception as exc:
             logger.debug("[%s] DuckDuckGo failed: %s", supplier, exc)
@@ -852,7 +876,7 @@ class ScraperEngine:
         if not pdf_urls:
             try:
                 results = search_bing(query, timeout=10, max_results=30)
-                pdf_urls = [r for r in results if r.lower().endswith(".pdf") and domain in r]
+                pdf_urls = [r for r in results if r.lower().endswith(".pdf") and _same_site(r, domain)]
                 logger.debug("[%s] Bing: %d PDF(s)", supplier, len(pdf_urls))
             except Exception as exc:
                 logger.debug("[%s] Bing failed: %s", supplier, exc)
@@ -1028,6 +1052,11 @@ class ScraperEngine:
             return
         if not _validate_url(pdf_url):
             logger.warning("[%s] Blocked unsafe URL: %s", supplier, pdf_url)
+            return
+        if not _same_site(pdf_url, domain, tuple(cfg.get("allowed_hosts", ()))):
+            logger.warning("[%s] Blocked off-domain PDF (expected %s): %s",
+                            supplier, domain, pdf_url)
+            state_db.mark_seen(pdf_url, "blocked_off_domain")
             return
 
         # Relevance - no network cost

@@ -79,6 +79,14 @@ The root `pytest.ini` sets `pythonpath = src`, which resolves imports like `from
 ### CrossRef import fix
 `crossref_standalone_fast.py` inserts its own directory into `sys.path` at import time (lines 10-15). This is needed because `pipeline.py` loads it via `importlib.util.spec_from_file_location`, which doesn't set up the module's path for local imports (e.g. `from crossref_utils import ...`). **If you refactor imports in cross-reference, preserve this pattern or switch to a proper package structure.**
 
+### Same-domain enforcement (scraper)
+`_download_pdf()` in `scraper_engine.py` rejects any PDF URL whose host isn't
+the vendor's domain (or a subdomain of it), regardless of which discovery
+path found it (sitemap / search / recursive walk). If a vendor legitimately
+serves docs from an unrelated CDN host, add it to that vendor's
+`allowed_hosts` list in the per-domain site-config JSON (`site_config_path`)
+— do not weaken the check itself.
+
 ### 7-day smart detection (scraper)
 State file: `.scraper_state.json` in the output directory. Config keys in `pipeline_config.json`: `scraper.skip_recent_sites` (bool) and `scraper.days_before_rescrape` (int, default 7). First pipeline run takes ~2h; subsequent runs within 7 days take ~10min.
 
