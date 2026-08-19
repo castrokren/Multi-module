@@ -1,6 +1,7 @@
 import sys
 import os
 import re
+import json
 import threading
 import time
 import requests
@@ -153,6 +154,19 @@ class CrawlerConfig:
 
 # Load configuration
 config = CrawlerConfig.from_file()
+
+
+def _load_network_cfg() -> dict:
+    """Load the network block from pipeline_config.json (the single source
+    of truth for egress proxy control). Returns {} if unavailable so the
+    GUI defaults to direct egress, matching the pipeline's fail-open
+    default."""
+    p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "pipeline_config.json")
+    try:
+        with open(p, encoding="utf-8") as f:
+            return json.load(f).get("network", {})
+    except Exception:
+        return {}
 
 
 class _TkLogHandler(logging.Handler):
@@ -2212,6 +2226,7 @@ class PDFCrawlerEnhancedApp:
                 allowlist_only=True,
                 use_keyword_filter=False,
                 supplier_keywords=supplier_keywords,
+                network_cfg=_load_network_cfg(),
             )
 
             self.log(f"Crawling {len(pairs)} suppliers via ScraperEngine...", "info")

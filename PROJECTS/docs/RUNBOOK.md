@@ -141,7 +141,178 @@ python -m PyInstaller pdf_crawler_gui_2.spec --noconfirm
 | `watch_input.log` | `src/services/` | Watcher activity | Yes |
 | `pipeline_*.log` | results dir | Per-run pipeline logs | Yes |
 
-## 8. Troubleshooting
+## 8. Malware scanning control (Windows Defender)
+
+Every PDF the pipeline touches is gated through Microsoft Defender (the
+OS-native engine, `MpCmdRun.exe`) **synchronously and inline**, before the
+file is stored, parsed, or transferred. This is a compliance control, not
+reliant on real-time on-access protection.
+
+### The three gates
+
+| Gate | Location | Trigger | On infected/error |
+|---|---|---|---|
+| G1 — pre-storage | `scraper_engine.py::_download_pdf` | After download, before the staging file is renamed into the supplier's `output\` folder | Quarantined; `seen_urls.status` = `malware_detected` / `scan_error` |
+| G2 — pre-parse | `crossref_standalone_fast.py` (both extraction paths) | Before any PDF parser opens the file | Quarantined; logged; skipped for the run |
+| G3 — pre-transfer | `pipeline.py::_collect_matched_pdfs` | Before a matched PDF is copied into the review folder | Quarantined; not copied |
+
+All three gates are **fail-closed**: scanner missing, timeout, or
+unrecognized output is treated exactly like an infection. A file that can
+never be scanned is never stored, parsed, or transferred.
+
+### Quarantine directory
+
+Flagged files move to `C:\Data\Crawler\quarantine\<supplier>\`, timestamped,
+never deleted automatically. To **review and release a false positive**:
+
+```powershell
+# 1. Inspect the scan reason from the audit log
+Get-Content "$(Get-ChildItem src\services\cross-reference\results\security_scan_*.log | Sort-Object Name | Select-Object -Last 1)"
+
+# 2. Confirm the file is genuinely clean (real-time scan + manual review)
+# 3. Manually move it back into its supplier folder under C:\Data\Crawler\output\
+#    and delete the stale quarantine copy. Releasing is ALWAYS manual - the
+#    pipeline will never un-quarantine a file by itself.
+```
+
+### Audit log
+
+Every verdict is written to `security_scan_<ts>.log` in the results
+directory (one line per file: path, verdict, detail). This is the artifact
+a compliance reviewer will ask for.
+
+### Configuration (`pipeline_config.json`)
+
+```json
+"security": {
+  "malware_scan_enabled": true,
+  "scan_timeout_seconds": 60,
+  "max_concurrent_scans": 4
+}
+```
+
+`malware_scan_enabled` is a **hard kill-switch**. Default is `true`; flipping
+it to `false` disables the entire control and requires the same sign-off as
+removing a Defender exclusion (below) — it deliberately turns off the
+mechanism this whole section exists to provide.
+
+### Host-level Defender configuration (do once on the server)
+
+```powershell
+# 1. Confirm real-time protection is on and signatures are fresh
+Get-MpComputerStatus | Select-Object AntivirusEnabled, RealTimeProtectionEnabled, AntivirusSignatureLastUpdated
+Set-MpPreference -DisableRealtimeMonitoring $false
+
+# 2. Force a signature update before trusting any scan result
+& "C:\Program Files\Windows Defender\MpCmdRun.exe" -SignatureUpdate
+
+# 3. Nightly full sweep of the data tree (backstop independent of the gates)
+$mp = "C:\Program Files\Windows Defender\MpCmdRun.exe"
+$action = New-ScheduledTaskAction -Execute $mp -Argument '-Scan -ScanType 3 -File "C:\Data\Crawler"'
+$trigger = New-ScheduledTaskTrigger -Daily -At 3am
+Register-ScheduledTask -TaskName "CrawlerDataDefenderSweep" -Action $action -Trigger $trigger -Description "Nightly Defender sweep of C:\Data\Crawler as a backstop to the pipeline's inline scan gates"
+```
+
+**Exclusion check (re-verify after any Defender policy change):**
+`ExclusionPath` must **not** contain `C:\Data\Crawler\` or any parent of it
+— an exclusion there blinds real-time protection to that tree. Check with
+`Get-MpPreference | Select-Object -ExpandProperty ExclusionPath`; if one
+appears (e.g. re-added by group policy), remove it
+(`Remove-MpPreference -ExclusionPath <path>`) with sign-off.
+
+### Troubleshooting the gates
+
+| Symptom | Cause / fix |
+|---|---|
+| File quarantined with `scan_error` / `scanner_not_found` | `MpCmdRun.exe` path changed, Defender service stopped, or scan timed out. Check `security_scan_*.log`. The pipeline is behaving correctly — it fails closed. |
+| EICAR test file reaches `quarantine\` | Gate working as designed (see acceptance test below). |
+| Sudden `malware_detected` on files ingested earlier | Defender signature update since ingest — the correct, intended catch at G3. Not a G1 bug. |
+
+## 8b. Egress proxy control (`network.*`)
+
+The scraper's HTTP egress is governed by the `network` block in
+`pipeline_config.json` — the single source of truth. By default the
+session **ignores** `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` env vars so
+behavior doesn't silently depend on whatever the host environment happens
+to have set:
+
+```json
+"network": {
+  "https_proxy": "",
+  "http_proxy": "",
+  "require_proxy": false,
+  "trust_env_proxy": false
+}
+```
+
+| Key | Meaning |
+|---|---|
+| `https_proxy` / `http_proxy` | Explicit proxy URL per scheme, e.g. `"http://proxy.corp.internal:8080"`. Empty string = no proxy for that scheme. |
+| `require_proxy` | Fail-closed switch. `true` + no proxy configured = the pipeline refuses to start (`RuntimeError`, caught in `run_scraper`; also caught by `--dry-run`). Mirrors the `malware_scan_enabled` kill-switch. |
+| `trust_env_proxy` | `false` (default): `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` env vars are ignored. Flip to `true` **only** if IT wants env-var-managed proxying (e.g. centrally pushed via GPO) instead of file-based config. |
+
+The GUI (`pdf_crawler_gui_2.py`) and `pdf_discovery_pipeline.py` read the
+same `network` block, so no entry point can bypass the control.
+
+**To point at a corporate proxy once IT confirms it is mandatory:**
+
+1. Set `https_proxy` (and `http_proxy` if targets use plain HTTP) to the
+   corporate proxy URL.
+2. Run a crawl and confirm requests actually transit it (check the
+   proxy-side access log for the crawler's User-Agent / source IP).
+3. Set `require_proxy` to `true`. Verify fail-closed: point the proxy URL
+   at an unreachable host and confirm the pipeline refuses to start with a
+   clear error instead of silently falling back to direct egress.
+
+**Credentials:** never put plaintext credentials in `pipeline_config.json`.
+If the proxy requires auth, interpolate the credential-bearing URL from an
+environment variable at runtime (set through Windows Credential Manager /
+whatever secret store the ops team uses) — e.g. `https_proxy` =
+`os.environ["CRAWLER_PROXY_URL"]`. Not confirmed as needed on this host as
+of 2026-08-19; do not add credentials without an IT decision on where they
+live.
+
+## 8c. HTTPS-only egress (`security.allow_http_hosts` / `https_upgrade_attempt`)
+
+The scraper is **HTTPS-only by default**: `_validate_url()` rejects any
+plain `http://` URL, and blocked URLs are recorded in the dedup DB with
+status `blocked_insecure_scheme`. This closes the audit gap where plain
+HTTP was accepted but never required.
+
+### Configuration (`pipeline_config.json`)
+
+```json
+"security": {
+  "malware_scan_enabled": true,
+  "allow_http_hosts": [],
+  "https_upgrade_attempt": true
+}
+```
+
+| Key | Meaning |
+|---|---|
+| `allow_http_hosts` | Explicit exception list of hostnames that may be fetched over plain HTTP. Starts **empty** (clean cutover). Each addition is a real security exception and requires the same sign-off as flipping `malware_scan_enabled` off (see section 8). |
+| `https_upgrade_attempt` | Default `true`. When an `http://` PDF link is found and its host is not in `allow_http_hosts`, the URL is rewritten to `https://` and fetched over HTTPS before blocking. URL-string rewrite only — no plaintext request is ever made to test reachability. If the upgraded HTTPS URL is unreachable it fails downstream like any other unreachable HTTPS URL; there is **no fallback to plaintext**. |
+
+**To add a genuine exception (only after confirming the vendor has no HTTPS
+endpoint):**
+
+1. Confirm the host really is HTTPS-incapable before accepting the
+   exception — many "http-only" links are just authored lazily and the site
+   serves HTTPS fine:
+   ```powershell
+   curl.exe -I https://<host>
+   ```
+2. Add the hostname to `security.allow_http_hosts` in
+   `pipeline_config.json` and document who approved it and why in this
+   section — same review bar as removing a Defender exclusion.
+
+A blocked `http://` PDF shows up in the run log as
+`Blocked insecure URL` (or `Blocked insecure URL (no HTTPS upgrade available)`
+when the upgraded variant fails validation) and in `.scraper_dedup.db` with
+status `blocked_insecure_scheme`.
+
+## 9. General troubleshooting
 
 | Symptom | Cause / fix |
 |---|---|
@@ -153,13 +324,13 @@ python -m PyInstaller pdf_crawler_gui_2.spec --noconfirm
 | Watcher doesn't trigger | Confirm the file suffix is `.csv`/`.xlsx`/`.xls` and check `watch_input.log`; verify `paths.input_excel_dir` in `pipeline_config.json` |
 | `Cannot find Supplier Name / Website columns` | Master list is missing those column headers |
 
-## 9. Verify the install
+## 10. Verify the install
 
 ```powershell
 cd <repo>\src\services
 python pipeline.py --dry-run                       # paths OK?
 python test_watch_input.py                          # watcher self-check
-cd scraper-full; python -m pytest tests/unit -q     # engine test suite (136 tests)
+cd scraper-full; python -m pytest tests/unit -q     # engine test suite (172 tests)
 ```
 
 All three passing = the server is ready. Drop a CSV into

@@ -24,6 +24,19 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 
+def _load_network_cfg(scraper_engine_path: Path) -> dict:
+    """Load the network block from pipeline_config.json (the single source
+    of truth for egress proxy control). Returns {} if unavailable so this
+    path defaults to direct egress, matching the pipeline's fail-open
+    default."""
+    cfg_path = Path(scraper_engine_path).resolve().parent.parent / "pipeline_config.json"
+    try:
+        with open(cfg_path, encoding="utf-8") as f:
+            return json.load(f).get("network", {})
+    except Exception:
+        return {}
+
+
 class PDFDiscoveryPipeline:
     """Main pipeline orchestrator."""
 
@@ -122,6 +135,7 @@ class PDFDiscoveryPipeline:
                 use_relevance_filter=True,
                 allowlist_only=False,  # Accept all relevant docs
                 skip_recent_sites=False,
+                network_cfg=_load_network_cfg(self.scraper_engine_path),
             )
 
             result = engine.run(str(supplier_file), str(pdfs_dir))

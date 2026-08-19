@@ -8,11 +8,18 @@ Run with: python -m pytest tests/test_pipeline.py -v -m unit
 """
 
 import json
+import sys
 import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock, mock_open, call
 
+_sec_dir = str(Path(__file__).resolve().parents[1] / "src" / "services" / "security")
+if _sec_dir not in sys.path:
+    sys.path.insert(0, _sec_dir)
+from defender_scan import ScanResult, ScanVerdict  # noqa: E402
+
 from pipeline import (
+    _collect_matched_pdfs,
     _import_from_file,
     _normalized_config,
     _validate_paths,
@@ -505,3 +512,45 @@ class TestMainDispatch:
                 except SystemExit:
                     pass
                 mock_exit.assert_called_once_with(1)
+
+
+# ============================================================================
+# _collect_matched_pdfs (Gate 3 - pre-transfer malware scan)
+# ============================================================================
+
+
+class TestCollectMatchedPdfsGate:
+    @pytest.mark.unit
+    def test_clean_pdf_copied(self, tmp_path):
+        src = tmp_path / "supplier" / "catalog.pdf"
+        src.parent.mkdir()
+        src.write_bytes(b"%PDF")
+        review = tmp_path / "review" / "20260101_000000"
+        q = tmp_path / "quarantine"
+        with patch("pipeline.scan_file",
+                   return_value=ScanResult(ScanVerdict.CLEAN, "no_threats")):
+            _collect_matched_pdfs([{"Matched PDF": str(src)}], review, str(q))
+        assert (review / "catalog.pdf").exists()
+        assert not list(q.rglob("*.pdf"))
+
+    @pytest.mark.unit
+    def test_infected_pdf_quarantined_not_copied(self, tmp_path):
+        src = tmp_path / "supplier" / "bad.pdf"
+        src.parent.mkdir()
+        src.write_bytes(b"%PDF")
+        review = tmp_path / "review" / "20260101_000000"
+        q = tmp_path / "quarantine"
+        with patch("pipeline.scan_file",
+                   return_value=ScanResult(ScanVerdict.INFECTED, "Threat found")):
+            _collect_matched_pdfs([{"Matched PDF": str(src)}], review, str(q))
+        assert not (review / "bad.pdf").exists()
+        assert not src.exists()
+        assert list(q.rglob("*.pdf"))
+
+    @pytest.mark.unit
+    def test_missing_file_skipped(self, tmp_path):
+        review = tmp_path / "review" / "20260101_000000"
+        with patch("pipeline.scan_file") as fake_scan:
+            _collect_matched_pdfs([{"Matched PDF": "C:/nope/missing.pdf"}],
+                                  review, str(tmp_path / "q"))
+        fake_scan.assert_not_called()

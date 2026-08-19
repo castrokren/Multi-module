@@ -63,6 +63,8 @@ def _setup_logging(results_dir: str) -> None:
         ],
     )
     logging.info("Pipeline log: %s", log_file)
+    # Dedicated audit channel for every malware-scan verdict (Task 8).
+    setup_security_logging(results_dir)
 
 
 logger = logging.getLogger("pipeline")
@@ -98,7 +100,7 @@ def _normalized_config(cfg: dict) -> dict:
     normalized = dict(cfg)
     paths = dict(cfg.get("paths", {}))
     for key in ("supplier_excel", "pdf_dir", "input_excel_dir", "labeled_dir",
-                "master_excel", "master_list", "results_dir"):
+                "master_excel", "master_list", "results_dir", "quarantine_dir"):
         paths[key] = _resolve_path(paths.get(key, ""))
     normalized["paths"] = paths
 
@@ -120,6 +122,18 @@ def _import_from_file(module_name: str, file_path: Path, symbol: str):
         return getattr(module, symbol)
     except AttributeError as exc:
         raise ImportError(f"Module {module_name} does not define {symbol}") from exc
+
+
+# ---------------------------------------------------------------------------
+# Security scan gate (Windows Defender) - loaded the same way as the stages,
+# so the module resolves regardless of the working directory.
+# ---------------------------------------------------------------------------
+_SECURITY_MODULE = SERVICES_ROOT / "security" / "defender_scan.py"
+scan_file = _import_from_file("defender_scan", _SECURITY_MODULE, "scan_file")
+ScanVerdict = _import_from_file("defender_scan", _SECURITY_MODULE, "ScanVerdict")
+quarantine_file = _import_from_file("defender_scan", _SECURITY_MODULE, "quarantine_file")
+setup_security_logging = _import_from_file("defender_scan", _SECURITY_MODULE, "setup_security_logging")
+set_scan_enabled = _import_from_file("defender_scan", _SECURITY_MODULE, "set_scan_enabled")
 
 
 # ---- Supplier keyword loading for scraper filtering ----
@@ -317,6 +331,9 @@ def _validate_paths(cfg: dict, stages: dict) -> list[str]:
         pdf_dir = paths.get("pdf_dir", "")
         if pdf_dir and not os.path.exists(os.path.dirname(pdf_dir) or "."):
             errors.append(f"Stage 1 (Scraper): parent directory of pdf_dir does not exist - {pdf_dir}")
+        netcfg = cfg.get("network", {})
+        if netcfg.get("require_proxy") and not (netcfg.get("http_proxy") or netcfg.get("https_proxy")):
+            errors.append("Stage 1 (Scraper): network.require_proxy is true but no http_proxy/https_proxy configured")
 
     if stages["classify"]:
         input_dir = paths.get("input_excel_dir", "")
@@ -386,6 +403,8 @@ def run_scraper(cfg: dict) -> bool:
 
     paths   = cfg.get("paths", {})
     scfg    = cfg.get("scraper", {})
+    sec     = cfg.get("security", {})
+    netcfg  = cfg.get("network", {})
 
     supplier_excel = paths["supplier_excel"]
     pdf_dir        = paths["pdf_dir"]
@@ -412,6 +431,13 @@ def run_scraper(cfg: dict) -> bool:
         skip_recent_sites        = scfg.get("skip_recent_sites", True),
         days_before_rescrape     = scfg.get("days_before_rescrape", 7),
         allowlist_only           = scfg.get("allowlist_only", False),
+        quarantine_dir           = paths.get("quarantine_dir", r"C:\Data\Crawler\quarantine"),
+        malware_scan_enabled     = sec.get("malware_scan_enabled", True),
+        scan_timeout_seconds     = sec.get("scan_timeout_seconds", 60),
+        max_concurrent_scans     = sec.get("max_concurrent_scans", 4),
+        network_cfg              = netcfg,
+        allow_http_hosts         = sec.get("allow_http_hosts", []),
+        https_upgrade_attempt    = sec.get("https_upgrade_attempt", True),
     )
 
     # Keywords come from the classified files: only rows the sorting marked
@@ -427,7 +453,11 @@ def run_scraper(cfg: dict) -> bool:
                 len(supplier_keywords))
 
     t0 = time.time()
-    summary = engine.run(supplier_excel, pdf_dir)
+    try:
+        summary = engine.run(supplier_excel, pdf_dir)
+    except RuntimeError as exc:
+        logger.error("Scraper refused to start: %s", exc)
+        return False
     elapsed = time.time() - t0
 
     logger.info(
@@ -530,10 +560,12 @@ def run_crossref(cfg: dict) -> bool:
 
     paths  = cfg.get("paths", {})
     xcfg   = cfg.get("crossref", {})
+    sec    = cfg.get("security", {})
     labeled_dir  = paths["labeled_dir"]
     master_excel = paths["master_excel"]
     pdf_dir      = paths["pdf_dir"]
     results_dir  = paths.get("results_dir", str(PROJECT_ROOT / "src" / "services" / "cross-reference" / "results"))
+    quarantine_dir = paths.get("quarantine_dir", r"C:\Data\Crawler\quarantine")
 
     logger.info("Labeled dir   : %s", labeled_dir)
     logger.info("Master Excel  : %s", master_excel)
@@ -573,7 +605,7 @@ def run_crossref(cfg: dict) -> bool:
     if len(excel_files) > 1:
         logger.info("(%d other labeled files also present - using most recent)", len(excel_files) - 1)
 
-    engine = CrossReferenceEngine()
+    engine = CrossReferenceEngine(quarantine_dir=quarantine_dir)
 
     t0 = time.time()
     success = engine.run_cross_reference_high_performance(
@@ -597,7 +629,7 @@ def run_crossref(cfg: dict) -> bool:
 
         # Copy matched PDFs to a review directory for manual inspection
         review_dir = Path(paths.get("review_dir", "C:/Data/Crawler/review")) / ts
-        _collect_matched_pdfs(engine.results, review_dir)
+        _collect_matched_pdfs(engine.results, review_dir, quarantine_dir)
 
         # Purge output PDFs older than 30 days that never matched
         matched_paths = {Path(r["Matched PDF"]).resolve()
@@ -609,7 +641,7 @@ def run_crossref(cfg: dict) -> bool:
     return success
 
 
-def _collect_matched_pdfs(results: list, review_dir: Path) -> None:
+def _collect_matched_pdfs(results: list, review_dir: Path, quarantine_dir: str = r"C:\Data\Crawler\quarantine") -> None:
     """Copy matched PDFs into a timestamped review folder."""
     if not results:
         return
@@ -617,9 +649,26 @@ def _collect_matched_pdfs(results: list, review_dir: Path) -> None:
     copied = 0
     for r in results:
         src = Path(r.get("Matched PDF", ""))
-        if src.is_file():
-            shutil.copy2(src, review_dir / src.name)
-            copied += 1
+        if not src.is_file():
+            continue
+
+        # --- malware scan gate (G3): a file that matched at cross-ref was
+        # already scanned clean at G1 on ingest; a differing verdict here
+        # means a Defender signature update since ingest (the intended catch)
+        # or file corruption/tampering at rest. Either way it is quarantined,
+        # never copied into the human-reviewed folder.
+        scan = scan_file(str(src))
+        if scan.verdict != ScanVerdict.CLEAN:
+            quarantine_file(str(src), quarantine_dir, reason=scan.detail)
+            logger.error(
+                "Malware scan blocked review copy of %s (%s): %s - "
+                "post-ingest re-scan flagged a previously-clean file",
+                src, scan.verdict.value, scan.detail,
+            )
+            continue
+
+        shutil.copy2(src, review_dir / src.name)
+        copied += 1
     logger.info("Copied %d matched PDF(s) to %s", copied, review_dir)
     _purge_old_reviews(review_dir.parent, days=30)
 
@@ -676,6 +725,11 @@ def main():
     args = parser.parse_args()
 
     cfg = _normalized_config(_load_config(args.config))
+
+    # Malware-scan kill-switch: default on. Flipping this to false in
+    # pipeline_config.json disables the whole control and needs the same
+    # sign-off as removing a Defender exclusion (see docs/RUNBOOK.md).
+    set_scan_enabled(cfg.get("security", {}).get("malware_scan_enabled", True))
 
     # Resolve which stages to run
     pipe = cfg.get("pipeline", {})

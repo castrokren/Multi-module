@@ -9,7 +9,25 @@
     "master_excel":    "data/masterlist/updated_master_list.xlsx",
     "master_list":     "data/masterlist/updated_master_list.xlsx",
     "results_dir":     "src/services/cross-reference/results",
-    "review_dir":      "C:/Data/Crawler/review"
+    "review_dir":      "C:/Data/Crawler/review",
+    "quarantine_dir":  "C:/Data/Crawler/quarantine"
+  },
+
+  "security": {
+    "_comment": "Malware scanning control. malware_scan_enabled is a hard kill-switch: default true, flipping it to false requires the same sign-off as removing a Defender exclusion (docs/RUNBOOK.md). HTTPS-only egress: allow_http_hosts is the explicit exception list for hosts that must be fetched over plain HTTP (starts empty; each addition requires sign-off per docs/RUNBOOK.md); https_upgrade_attempt rewrites http:// links to https:// before blocking.",
+    "malware_scan_enabled": true,
+    "scan_timeout_seconds": 60,
+    "max_concurrent_scans": 4,
+    "allow_http_hosts": [],
+    "https_upgrade_attempt": true
+  },
+
+  "network": {
+    "_comment": "Egress proxy control. Empty https_proxy/http_proxy = no proxy for that scheme. require_proxy=true makes the pipeline refuse to start when no proxy is configured (fail-closed). trust_env_proxy=false ignores HTTP_PROXY/HTTPS_PROXY/NO_PROXY env vars so this file is the single source of truth (docs/RUNBOOK.md).",
+    "https_proxy": "",
+    "http_proxy": "",
+    "require_proxy": false,
+    "trust_env_proxy": false
   },
 
   "pipeline": {

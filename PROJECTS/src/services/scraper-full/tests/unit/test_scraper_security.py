@@ -182,8 +182,15 @@ class TestValidateUrl:
         assert _validate_url("https://www.example.com") is True
 
     @pytest.mark.unit
-    def test_valid_http_url(self):
-        assert _validate_url("http://example.com/page") is True
+    def test_http_blocked_by_default(self):
+        assert _validate_url("http://example.com/page") is False
+
+    @pytest.mark.unit
+    def test_http_allowed_via_exception(self):
+        assert _validate_url(
+            "http://example.com/page",
+            allow_http_hosts=frozenset({"example.com"}),
+        ) is True
 
     @pytest.mark.unit
     def test_rejects_localhost(self):
