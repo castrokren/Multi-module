@@ -4,7 +4,102 @@ How to install and run the crawler pipeline on a new Windows server.
 Covers: dependencies, directory setup, manual runs, automatic runs
 (input-directory watcher), the GUI, and troubleshooting.
 
-Last verified: 2026-07-09.
+Last verified: 2026-08-19.
+
+---
+
+## 0. First-time production deployment (git clone)
+
+For a server that has never had this repo on it before. If the data drive
+isn't `C:` (e.g. the server has a separate `D:` for data), read the callouts
+below before running Section 3's commands as written.
+
+1. **Prereqs.** Python 3.10+, `git`, PowerShell. Confirm Windows Defender is
+   present and active *before* cloning — no code-level control substitutes
+   for a disabled AV engine:
+   ```powershell
+   Get-MpComputerStatus | Select-Object AntivirusEnabled, RealTimeProtectionEnabled, AntivirusSignatureLastUpdated
+   ```
+   Both `AntivirusEnabled` and `RealTimeProtectionEnabled` must be `True`.
+
+2. **Clone and check out `main`:**
+   ```powershell
+   git clone https://github.com/castrokren/Multi-module.git <repo>
+   cd <repo>
+   git checkout main
+   git log -1 --oneline   # should show the malware-scan-gate/egress-controls merge
+   ```
+
+3. **Install dependencies:**
+   ```powershell
+   cd <repo>\PROJECTS\src\services
+   python -m pip install -r requirements.txt
+   ```
+
+4. **Data directory — read this if the data drive isn't `C:`.** Section 3
+   below and several code defaults assume `C:\Data\Crawler\`. To use a
+   different drive (e.g. `D:`):
+   - Create the tree on the real drive instead of `C:`:
+     ```powershell
+     New-Item -ItemType Directory -Force D:\Data\Crawler\input
+     New-Item -ItemType Directory -Force D:\Data\Crawler\labeled
+     New-Item -ItemType Directory -Force D:\Data\Crawler\output
+     New-Item -ItemType Directory -Force D:\Data\Crawler\review
+     New-Item -ItemType Directory -Force D:\Data\Crawler\quarantine
+     ```
+   - Point `src/services/pipeline_config.json`'s `paths` block at that
+     drive — **this is the one file that actually controls where the
+     pipeline reads/writes**; everything else in the codebase that
+     mentions `C:\Data\Crawler` is either a doc reference or a fallback
+     default only used if this config is missing the key:
+     ```json
+     "paths": {
+       "pdf_dir":         "D:/Data/Crawler/output",
+       "input_excel_dir": "D:/Data/Crawler/input",
+       "labeled_dir":     "D:/Data/Crawler/labeled",
+       "review_dir":      "D:/Data/Crawler/review",
+       "quarantine_dir":  "D:/Data/Crawler/quarantine"
+     }
+     ```
+   - **Two known gaps that config does *not* cover** (flagging rather than
+     silently leaving broken — fix as a fast-follow if either matters to
+     you):
+     - The optional homepage-keyword pre-check (`scraper_engine.py`'s
+       `_HARDWARE_KEYWORDS_FILE`/`_SOFTWARE_KEYWORDS_FILE`) is hardcoded to
+       `C:\Data\Crawler\labeled\...ACTIVE.txt` and isn't read from config.
+       This fails safe — a missing file just means the optional check is
+       skipped, same as today — so it's not a security gap, just a feature
+       that silently won't activate unless those two files are also placed
+       at the `C:` path, or the constants are updated to read from config.
+     - `crossref_standalone_fast.py`'s extracted-text debug dump
+       (`save_extracted_text`) always writes to
+       `C:/Data/Crawler/pdf_discovery/documents_text`, unconditionally,
+       regardless of `pipeline_config.json`. Low risk (it's a debug
+       artifact, not part of any control), but it means text dumps land on
+       `C:` even when everything else is on `D:`.
+   - The Defender exclusion-path check (Section 8) and the nightly sweep's
+     scheduled-task argument must point at the **real** data drive
+     (`D:\Data\Crawler`, not `C:\Data\Crawler`) — see the callouts in
+     Section 8 below.
+
+5. **Verify the install** (Section 10) before wiring up the watcher, using
+   whichever drive Step 4 landed on:
+   ```powershell
+   python pipeline.py --dry-run
+   python test_watch_input.py
+   cd scraper-full; python -m pytest tests/unit -q
+   ```
+
+6. **Malware-scan-gate acceptance tests** — run these against the real data
+   drive before treating the deploy as done (full list in
+   `PROJECTS/planning/2026-08-18-malware-scanning-control-plan.md`, Task 10):
+   drop an EICAR file and confirm it lands in `quarantine\`, not `output\`;
+   temporarily break `MpCmdRun.exe`'s path and confirm the pipeline fails
+   closed rather than storing the file; confirm the nightly Defender sweep
+   scheduled task exists and last ran successfully.
+
+7. Only then set up the input watcher (Section 5) and the nightly Defender
+   sweep (Section 8) for unattended operation.
 
 ---
 
@@ -213,9 +308,16 @@ $trigger = New-ScheduledTaskTrigger -Daily -At 3am
 Register-ScheduledTask -TaskName "CrawlerDataDefenderSweep" -Action $action -Trigger $trigger -Description "Nightly Defender sweep of C:\Data\Crawler as a backstop to the pipeline's inline scan gates"
 ```
 
+> If this server's data lives on a different drive (Section 0, Step 4), the
+> `-File` argument above must point at that real path (e.g.
+> `-File "D:\Data\Crawler"`), not `C:\Data\Crawler` — the scheduled task
+> only sweeps the literal path it's given.
+
 **Exclusion check (re-verify after any Defender policy change):**
-`ExclusionPath` must **not** contain `C:\Data\Crawler\` or any parent of it
-— an exclusion there blinds real-time protection to that tree. Check with
+`ExclusionPath` must **not** contain the crawler's actual data root (e.g.
+`D:\Data\Crawler\` if that's where Section 0 put it — `C:\Data\Crawler\` on
+a default install) or any parent of it — an exclusion there blinds
+real-time protection to that tree. Check with
 `Get-MpPreference | Select-Object -ExpandProperty ExclusionPath`; if one
 appears (e.g. re-added by group policy), remove it
 (`Remove-MpPreference -ExclusionPath <path>`) with sign-off.

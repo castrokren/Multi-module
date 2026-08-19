@@ -163,15 +163,20 @@ def _security_gate(pdf_path, quarantine_dir=None, timeout=60):
 
 def process_single_pdf(args):
     """Standalone function to process a single PDF for multiprocessing."""
-    pdf_path, search_keywords, description, threshold = args
-    
+    pdf_path, search_keywords, description, threshold = args[:4]
+    # quarantine_dir travels as a 5th tuple element rather than through the
+    # module-level _QUARANTINE_DIR global: on Windows, ProcessPoolExecutor
+    # spawns a fresh interpreter per worker, so a global mutated in the
+    # parent process (CrossReferenceEngine.__init__) is invisible here.
+    quarantine_dir = args[4] if len(args) > 4 else None
+
     # Check global stop flag more frequently
     if GlobalStopManager.should_stop():
         return None
-    
+
     try:
         # Extract text from PDF
-        pdf_text = extract_pdf_text_standalone(pdf_path)
+        pdf_text = extract_pdf_text_standalone(pdf_path, quarantine_dir=quarantine_dir)
 
         if GlobalStopManager.should_stop():
             return None
@@ -218,17 +223,17 @@ def save_extracted_text(pdf_path, extracted_text):
     except Exception as e:
         pass  # Silent fail - don't disrupt PDF processing
 
-def extract_pdf_text_standalone(pdf_path, timeout_seconds=15, save_text=False):
+def extract_pdf_text_standalone(pdf_path, timeout_seconds=15, save_text=False, quarantine_dir=None):
     """Standalone PDF text extraction function for multiprocessing."""
     try:
         # Check if file exists and is readable
         if not os.path.exists(pdf_path):
             return ""
-        
+
         # --- malware scan gate (G2): fail-closed, before ANY parser opens the
         # file (PyPDF2 or pdfplumber). A blocked file is quarantined and logged
         # separately from a merely-unreadable PDF. ---------------------------
-        if not _security_gate(pdf_path, timeout=timeout_seconds):
+        if not _security_gate(pdf_path, quarantine_dir=quarantine_dir, timeout=timeout_seconds):
             return ""
         
         # Check file size
@@ -2044,8 +2049,8 @@ class CrossReferenceEngine:
                 # Submit all tasks
                 future_to_args = {}
                 for pdf_path, supplier_dir in pdf_file_paths:
-                    future = executor.submit(process_single_pdf, 
-                                           (pdf_path, search_keywords, description, threshold))
+                    future = executor.submit(process_single_pdf,
+                                           (pdf_path, search_keywords, description, threshold, self.quarantine_dir))
                     future_to_args[future] = (pdf_path, supplier_dir)
                 
                 # Process completed tasks with timeout
@@ -2111,7 +2116,7 @@ class CrossReferenceEngine:
             print(f"        [SEQ] Sequential processing: PDF {i}/{total_pdfs}")
 
             try:
-                result = process_single_pdf((pdf_path, search_keywords, description, threshold))
+                result = process_single_pdf((pdf_path, search_keywords, description, threshold, self.quarantine_dir))
                 if result:
                     matches.append(result)
                     print(f"        [MATCH] PDF {i}/{total_pdfs}: {os.path.basename(result['pdf_path'])}")
