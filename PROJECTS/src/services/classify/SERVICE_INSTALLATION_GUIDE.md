@@ -22,6 +22,10 @@ Fixed error "The parameter is incorrect. (87)" by updating service class attribu
 3. ✅ Check **Adaptive Processor** settings if you want to use learning features
 4. Click **Install** button
 
+> **Security note:** the UI passes the password to the installer via **stdin**, not as a
+> command-line argument, and the on-screen log shows it redacted (`********`). After the
+> command finishes, the password field is cleared automatically.
+
 ### 2. Using Command Line (Administrator Required)
 
 **Install Service:**
@@ -31,8 +35,14 @@ python simple_W_service.py install
 
 **Install with specific account:**
 ```cmd
-python simple_W_service.py --username nyumc\castrk05 --password YourPassword --startup auto install
+echo YourPassword | python simple_W_service.py --username nyumc\castrk05 --password-stdin --startup auto install
 ```
+
+> **Security note:** credentials are supplied via **stdin** (`--password-stdin`), never as a
+> command-line flag. A plaintext `--password <value>` would be visible in the process
+> command line (Task Manager, `Get-CimInstance Win32_Process`, etc.) — do not use it.
+> The classify UI also reads the password from its input field and passes it the same
+> way, and its on-screen log redacts the password from the displayed command.
 
 **Start Service:**
 ```cmd

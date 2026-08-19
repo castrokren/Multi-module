@@ -108,6 +108,7 @@ class TestMagicBytes:
         session = MagicMock()
         resp = MagicMock()
         resp.headers = {"content-type": "application/pdf"}
+        resp.history = []
         resp.iter_content.return_value = iter([b"<html><body>Login required</body></html>"])
         session.get.return_value = resp
         session.head.return_value = MagicMock(headers={})
@@ -125,10 +126,15 @@ class TestMagicBytes:
     def test_pdf_payload_accepted(self, tmp_path):
         from unittest.mock import MagicMock
         from scraper_engine import _StateDB, DEFAULT_SITE_CONFIG
-        e = _engine(use_relevance_filter=False, min_pdf_size_bytes=4)
+        # malware_scan_enabled=False: these tests exercise magic-byte/dedup,
+        # not the scan gate (covered by the security suite, which needs a
+        # host with Defender active).
+        e = _engine(use_relevance_filter=False, min_pdf_size_bytes=4,
+                    malware_scan_enabled=False)
         session = MagicMock()
         resp = MagicMock()
         resp.headers = {"content-type": "application/pdf"}
+        resp.history = []
         resp.iter_content.return_value = iter([b"%PDF-1.4 " + b"x" * 600])
         session.get.return_value = resp
         session.head.return_value = MagicMock(headers={})
@@ -142,7 +148,8 @@ class TestMagicBytes:
     def test_duplicate_content_removed(self, tmp_path):
         from unittest.mock import MagicMock
         from scraper_engine import _StateDB, DEFAULT_SITE_CONFIG
-        e = _engine(use_relevance_filter=False, min_pdf_size_bytes=4)
+        e = _engine(use_relevance_filter=False, min_pdf_size_bytes=4,
+                    malware_scan_enabled=False)
         db = _StateDB(str(tmp_path / "state.db"))
         cfg = dict(DEFAULT_SITE_CONFIG, delay=0)
         payload = b"%PDF-1.4 " + b"x" * 600
@@ -150,6 +157,7 @@ class TestMagicBytes:
             session = MagicMock()
             resp = MagicMock()
             resp.headers = {"content-type": "application/pdf"}
+            resp.history = []
             resp.iter_content.return_value = iter([payload])
             session.get.return_value = resp
             session.head.return_value = MagicMock(headers={})

@@ -68,6 +68,20 @@ except ImportError:
     _HAS_WEB_SEARCHER = False
 
 # ---------------------------------------------------------------------------
+# Optional malware scan gate (Windows Defender)
+# ---------------------------------------------------------------------------
+try:
+    import sys as _sys2, os as _os2
+    _sys2.path.insert(
+        0,
+        _os2.path.join(_os2.path.dirname(os.path.abspath(__file__)), "..", "security"),
+    )
+    from defender_scan import scan_file, ScanVerdict, quarantine_file
+    _HAS_SCAN_GATE = True
+except ImportError:
+    _HAS_SCAN_GATE = False
+
+# ---------------------------------------------------------------------------
 # Keyword-based filtering + Camofox integration
 # ---------------------------------------------------------------------------
 _HARDWARE_KEYWORDS_FILE = r"C:\Data\Crawler\labeled\hardware_keywords_ACTIVE.txt"
@@ -190,10 +204,20 @@ def _keywords_match(keywords, text: str) -> bool:
 # Security helpers
 # ---------------------------------------------------------------------------
 
-def _validate_url(url: str) -> bool:
+def _validate_url(url: str, allow_http_hosts: frozenset[str] = frozenset()) -> bool:
+    """Validate a URL is a real, external http(s) URL.
+
+    Plain ``http://`` is rejected by default (HTTPS-only egress). Hosts listed
+    in ``allow_http_hosts`` are the only way an http URL passes - an explicit,
+    reviewable exception list (pipeline_config.json ``security.allow_http_hosts``)
+    mirroring the per-vendor ``allowed_hosts`` override. The localhost /
+    loopback checks apply regardless of the exception list.
+    """
     try:
         p = urlparse(url)
-        host = p.netloc.split(":")[0]  # strip port if present
+        host = p.netloc.split(":")[0].lower()  # strip port if present
+        if p.scheme == "http" and host not in allow_http_hosts:
+            return False
         return (
             p.scheme in ("http", "https")
             and bool(host)
@@ -430,9 +454,29 @@ _USER_AGENT = (
 )
 
 
-def _make_session(timeout: int = 15) -> requests.Session:
+def _make_session(timeout: int = 15, network_cfg: dict | None = None) -> requests.Session:
+    network_cfg = network_cfg or {}
     s = requests.Session()
     s.headers.update({"User-Agent": _USER_AGENT})
+
+    s.trust_env = bool(network_cfg.get("trust_env_proxy", False))
+
+    proxies = {}
+    if network_cfg.get("http_proxy"):
+        proxies["http"] = network_cfg["http_proxy"]
+    if network_cfg.get("https_proxy"):
+        proxies["https"] = network_cfg["https_proxy"]
+
+    if network_cfg.get("require_proxy") and not proxies:
+        raise RuntimeError(
+            "network.require_proxy is true but no http_proxy/https_proxy "
+            "configured in pipeline_config.json - refusing to start "
+            "unproxied egress."
+        )
+
+    if proxies:
+        s.proxies.update(proxies)
+
     retry = Retry(
         total=3,
         backoff_factor=1.0,
@@ -473,6 +517,31 @@ class ScraperEngine:
         Only download PDFs matching the product-doc allowlist.
     site_config_path : str | None
         Path to per-domain JSON config (optional).
+    use_keyword_filter : bool
+        Apply keyword filtering.
+    supplier_keywords : dict[str, list[str]] | None
+        Per-supplier keyword sets (from the labeled files).
+    quarantine_dir : str
+        Where G1 moves files that fail the malware scan gate.
+    malware_scan_enabled : bool
+        Master switch for the inline scan gate (kill-switch).
+    scan_timeout_seconds : int
+        Per-file Defender scan timeout.
+    max_concurrent_scans : int
+        Upper bound on simultaneous MpCmdRun.exe processes across
+        the per-domain worker threads.
+    network_cfg : dict | None
+        Egress proxy control (the ``network`` block from
+        ``pipeline_config.json``): http_proxy, https_proxy,
+        require_proxy (fail-closed), trust_env_proxy.
+    allow_http_hosts : iterable[str] | None
+        Hostnames explicitly permitted to be fetched over plain HTTP
+        (``security.allow_http_hosts``). Empty by default - HTTPS-only egress.
+    https_upgrade_attempt : bool
+        When an ``http://`` PDF link is found and its host is not excepted,
+        rewrite it to ``https://`` and try that before blocking
+        (``security.https_upgrade_attempt``). URL-string rewrite only - no
+        plaintext request is ever made. Default True.
     """
 
     def __init__(
@@ -489,6 +558,13 @@ class ScraperEngine:
         site_config_path: str | None = None,
         use_keyword_filter: bool = True,
         supplier_keywords: dict[str, list[str]] | None = None,
+        quarantine_dir: str = r"C:\Data\Crawler\quarantine",
+        malware_scan_enabled: bool = True,
+        scan_timeout_seconds: int = 60,
+        max_concurrent_scans: int = 4,
+        network_cfg: dict | None = None,
+        allow_http_hosts: frozenset[str] | list[str] | tuple[str, ...] | None = None,
+        https_upgrade_attempt: bool = True,
     ):
         self.page_timeout = page_timeout
         self.max_pdf_size_mb = max_pdf_size_mb
@@ -503,6 +579,14 @@ class ScraperEngine:
         self.supplier_keywords = supplier_keywords or {}
         self._site_overrides = _load_site_configs(site_config_path)
         self.keywords = _load_keywords() if use_keyword_filter else set()
+
+        self.quarantine_dir = quarantine_dir
+        self.malware_scan_enabled = malware_scan_enabled
+        self.scan_timeout_seconds = scan_timeout_seconds
+        self._scan_semaphore = threading.Semaphore(max_concurrent_scans)
+        self.network_cfg = network_cfg or {}
+        self.allow_http_hosts = frozenset(allow_http_hosts or ())
+        self.https_upgrade_attempt = bool(https_upgrade_attempt)
 
         self._stop_event = threading.Event()
         self._rate_limiter = _DomainRateLimiter()
@@ -594,7 +678,7 @@ class ScraperEngine:
                 continue
             if not url.startswith(("http://", "https://")):
                 url = "https://" + url
-            if _validate_url(url):
+            if _validate_url(url, self.allow_http_hosts):
                 pairs.append((name, url))
             else:
                 logger.warning("Invalid URL for %s: %s - skipping", name, url)
@@ -616,6 +700,15 @@ class ScraperEngine:
         self.pdf_count = 0
         self._supplier_pdf_counts.clear()
         self._warned_pdf_cap.clear()
+
+        if self.network_cfg.get("require_proxy") and not (
+            self.network_cfg.get("http_proxy") or self.network_cfg.get("https_proxy")
+        ):
+            raise RuntimeError(
+                "network.require_proxy is true but no http_proxy/https_proxy "
+                "configured in pipeline_config.json - refusing to start "
+                "unproxied egress."
+            )
 
         output_dir = str(output_dir)
         os.makedirs(output_dir, exist_ok=True)
@@ -718,7 +811,7 @@ class ScraperEngine:
         on_done,
     ):
         """One thread per domain.  Processes all suppliers on that domain in sequence."""
-        session = _make_session(self.page_timeout)
+        session = _make_session(self.page_timeout, self.network_cfg)
         for supplier, url in pairs:
             if not self.running:
                 break
@@ -904,7 +997,7 @@ class ScraperEngine:
 
         if not self.running or depth > max_depth or url in visited:
             return
-        if not _validate_url(url):
+        if not _validate_url(url, self.allow_http_hosts):
             return
         if len(visited) >= max_pages:
             logger.warning("[%s] Page limit (%d) reached", supplier, max_pages)
@@ -1050,9 +1143,21 @@ class ScraperEngine:
                                "further downloads (generic keyword slipping through?)",
                                supplier, cfg["max_pdfs_per_supplier"])
             return
-        if not _validate_url(pdf_url):
-            logger.warning("[%s] Blocked unsafe URL: %s", supplier, pdf_url)
-            return
+        if not _validate_url(pdf_url, self.allow_http_hosts):
+            if pdf_url.lower().startswith("http://") and self.https_upgrade_attempt:
+                upgraded = "https://" + pdf_url[len("http://"):]
+                if _validate_url(upgraded, self.allow_http_hosts):
+                    logger.info("[%s] Upgraded insecure link to HTTPS: %s", supplier, upgraded)
+                    pdf_url = upgraded
+                else:
+                    logger.warning("[%s] Blocked insecure URL (no HTTPS upgrade available): %s",
+                                   supplier, pdf_url)
+                    state_db.mark_seen(pdf_url, "blocked_insecure_scheme")
+                    return
+            else:
+                logger.warning("[%s] Blocked insecure URL: %s", supplier, pdf_url)
+                state_db.mark_seen(pdf_url, "blocked_insecure_scheme")
+                return
         if not _same_site(pdf_url, domain, tuple(cfg.get("allowed_hosts", ()))):
             logger.warning("[%s] Blocked off-domain PDF (expected %s): %s",
                             supplier, domain, pdf_url)
@@ -1078,6 +1183,7 @@ class ScraperEngine:
             filename = f"document_{int(time.time())}.pdf"
 
         file_path = os.path.join(vendor_folder, filename)
+        staging_path = os.path.join(vendor_folder, f".{filename}.scanning")
 
         # Dedup by path
         if state_db.is_downloaded(file_path) or os.path.exists(file_path):
@@ -1113,6 +1219,12 @@ class ScraperEngine:
             resp = session.get(pdf_url, timeout=self.page_timeout, stream=True)
             resp.raise_for_status()
 
+            if resp.history and not _same_site(resp.url, domain, tuple(cfg.get("allowed_hosts", ()))):
+                logger.warning("[%s] Blocked off-domain redirect (expected %s): %s -> %s",
+                                supplier, domain, pdf_url, resp.url)
+                state_db.update_status(pdf_url, "blocked_off_domain")
+                return
+
             ct = resp.headers.get("content-type", "").lower()
             cl = resp.headers.get("content-length")
 
@@ -1137,19 +1249,19 @@ class ScraperEngine:
                 return
 
             downloaded = len(first)
-            with open(file_path, "wb") as f:
+            with open(staging_path, "wb") as f:
                 f.write(first)
                 for chunk in stream:
                     if not self.running:
                         try:
-                            os.remove(file_path)
+                            os.remove(staging_path)
                         except Exception:
                             pass
                         return
                     downloaded += len(chunk)
                     if downloaded > max_bytes:
                         try:
-                            os.remove(file_path)
+                            os.remove(staging_path)
                         except Exception:
                             pass
                         logger.warning("[%s] Exceeded size mid-download - removed: %s", supplier, filename)
@@ -1157,28 +1269,42 @@ class ScraperEngine:
                         return
                     f.write(chunk)
 
-            actual = os.path.getsize(file_path)
+            actual = os.path.getsize(staging_path)
             if actual < self.min_pdf_size_bytes:
-                os.remove(file_path)
+                os.remove(staging_path)
                 logger.warning("[%s] File too small (%d bytes) - removed: %s", supplier, actual, filename)
                 state_db.update_status(pdf_url, "skipped_small")
                 return
 
             # Same catalog PDF often served at several URLs - keep one copy
-            file_hash = _file_hash(file_path)
+            file_hash = _file_hash(staging_path)
             if file_hash and state_db.is_hash_seen(file_hash):
-                os.remove(file_path)
+                os.remove(staging_path)
                 logger.info("[%s] Duplicate content - removed: %s", supplier, filename)
                 state_db.update_status(pdf_url, "duplicate")
                 return
 
-            if not self._content_relevant(file_path, supplier):
-                os.remove(file_path)
+            if not self._content_relevant(staging_path, supplier):
+                os.remove(staging_path)
                 logger.info("[%s] First page has no supplier keywords - removed: %s",
                             supplier, filename)
                 state_db.update_status(pdf_url, "rejected_content")
                 return
 
+            # --- malware scan gate (G1): fail-closed, before the file ever
+            # reaches the permanent output tree -------------------------------
+            if self.malware_scan_enabled:
+                with self._scan_semaphore:
+                    scan = scan_file(staging_path, timeout=self.scan_timeout_seconds)
+                if scan.verdict != ScanVerdict.CLEAN:
+                    self._quarantine(staging_path, supplier, pdf_url, scan)
+                    state_db.update_status(
+                        pdf_url,
+                        "malware_detected" if scan.verdict == ScanVerdict.INFECTED else "scan_error",
+                    )
+                    return
+
+            os.replace(staging_path, file_path)  # atomic on the same volume
             state_db.mark_downloaded(file_path, pdf_url, supplier)
             if file_hash:
                 state_db.mark_hash(file_hash)
@@ -1198,8 +1324,22 @@ class ScraperEngine:
         except Exception as exc:
             logger.error("[%s] Unexpected error %s: %s", supplier, pdf_url, exc)
             state_db.update_status(pdf_url, "error")
-            try:
-                if os.path.exists(file_path):
-                    os.remove(file_path)
-            except Exception:
-                pass
+            for p in (file_path, staging_path):
+                try:
+                    if os.path.exists(p):
+                        os.remove(p)
+                except Exception:
+                    pass
+
+    def _quarantine(self, staging_path: str, supplier: str, pdf_url: str, scan) -> None:
+        """Move a G1-flagged staging file into the quarantine tree.
+
+        Delegates to the shared quarantine_file() helper in defender_scan so
+        the scraper and cross-reference stages use one implementation instead
+        of two copies drifting apart.
+        """
+        dest = quarantine_file(staging_path, self.quarantine_dir, reason=scan.detail)
+        logger.error(
+            "[%s] Malware scan blocked %s (%s): %s -> %s",
+            supplier, pdf_url, scan.verdict.value, scan.detail, dest,
+        )

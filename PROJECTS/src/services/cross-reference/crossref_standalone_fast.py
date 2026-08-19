@@ -14,6 +14,14 @@ _MODULE_DIR = Path(__file__).parent
 if str(_MODULE_DIR) not in sys.path:
     sys.path.insert(0, str(_MODULE_DIR))
 
+# Same dynamic-import accommodation for the shared security service
+# (Windows Defender scan gate). Mirrors the web_searcher pattern in
+# scraper_engine.py - do not invent a second import mechanism.
+_SECURITY_DIR = str(Path(__file__).resolve().parents[1] / "security")
+if _SECURITY_DIR not in sys.path:
+    sys.path.insert(0, _SECURITY_DIR)
+from defender_scan import scan_file, ScanVerdict, quarantine_file  # noqa: E402
+
 import re
 import time
 import traceback
@@ -21,6 +29,7 @@ import signal
 import threading
 import platform
 import multiprocessing
+import logging
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from datetime import datetime
 from difflib import SequenceMatcher
@@ -29,6 +38,8 @@ import pdfplumber
 import pandas as pd
 
 from crossref_utils import normalize_filename, deduplicate_matches
+
+logger = logging.getLogger(__name__)
 
 # Global stop flag for process termination
 GLOBAL_STOP_FLAG = False
@@ -128,6 +139,28 @@ def vv_log(message):
 # Check if we're on Windows (where SIGALRM is not available)
 IS_WINDOWS = platform.system() == "Windows"
 
+# Default quarantine root for G2. Mirrors security.quarantine_dir in
+# pipeline_config.json; CrossReferenceEngine.__init__ can override it.
+_QUARANTINE_DIR = r"C:\Data\Crawler\quarantine"
+
+
+def _security_gate(pdf_path, quarantine_dir=None, timeout=60):
+    """G2 gate: return True if the file is safe to parse, else False.
+
+    Any non-clean verdict (infected OR scanner error) blocks the file and
+    routes it through the shared quarantine_file() helper so it is
+    distinguishable in logs from a PDF that merely has no text layer.
+    """
+    scan = scan_file(pdf_path, timeout=timeout)
+    if scan.verdict == ScanVerdict.CLEAN:
+        return True
+    logger.error(
+        "Malware scan blocked %s (%s): %s",
+        os.path.basename(pdf_path), scan.verdict.value, scan.detail,
+    )
+    quarantine_file(pdf_path, quarantine_dir or _QUARANTINE_DIR, reason=scan.detail)
+    return False
+
 def process_single_pdf(args):
     """Standalone function to process a single PDF for multiprocessing."""
     pdf_path, search_keywords, description, threshold = args
@@ -190,6 +223,12 @@ def extract_pdf_text_standalone(pdf_path, timeout_seconds=15, save_text=False):
     try:
         # Check if file exists and is readable
         if not os.path.exists(pdf_path):
+            return ""
+        
+        # --- malware scan gate (G2): fail-closed, before ANY parser opens the
+        # file (PyPDF2 or pdfplumber). A blocked file is quarantined and logged
+        # separately from a merely-unreadable PDF. ---------------------------
+        if not _security_gate(pdf_path, timeout=timeout_seconds):
             return ""
         
         # Check file size
@@ -530,11 +569,15 @@ class CrossReferenceEngine:
     # Each entry is typically 5-20 KB, so 300 entries ~ 3-6 MB.
     _PDF_CACHE_MAX = 300
 
-    def __init__(self):
+    def __init__(self, quarantine_dir=None):
         self.results = []
         self.parent_gui_processes = []  # Track child processes for cleanup
         self.pdf_filter = PDFSmartFilter()  # Initialize smart PDF filtering
         self._pdf_text_cache = {}          # path -> extracted text (avoids re-reading same PDF)
+        if quarantine_dir:
+            global _QUARANTINE_DIR
+            _QUARANTINE_DIR = quarantine_dir
+        self.quarantine_dir = _QUARANTINE_DIR
         print("CrossReferenceEngine initialized with smart PDF filtering")
     
     def _get_fallback_memory_gb(self):
@@ -2200,6 +2243,13 @@ class CrossReferenceEngine:
             # Check if file exists and is readable
             if not os.path.exists(pdf_path):
                 print(f"    [ERROR] File not found: {os.path.basename(pdf_path)}")
+                return ""
+            
+            # --- malware scan gate (G2): fail-closed, before ANY parser opens
+            # the file. A blocked file is quarantined, never parsed, and is
+            # distinguishable from a PDF that merely has no text layer. ------
+            if not _security_gate(pdf_path, quarantine_dir=self.quarantine_dir,
+                                  timeout=timeout_seconds):
                 return ""
             
             # Check file size - skip very large files that might be corrupted

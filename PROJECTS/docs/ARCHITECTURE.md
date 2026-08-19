@@ -68,7 +68,7 @@ flowchart TB
 | Part | File | Role |
 |---|---|---|
 | Orchestrator | `src/services/pipeline.py` | Runs stages in order, per-stage CLI skip/only flags, `stop_on_failure` |
-| Config | `src/services/pipeline_config.json` | Paths, stage toggles, scraper caps, crossref threshold |
+| Config | `src/services/pipeline_config.json` | Paths, stage toggles, scraper caps, crossref threshold, `security` (malware-scan gate) |
 | Crawl engine | `scraper-full/scraper_engine.py` | Discovery, download, validation, dedup, rate limiting, state DB |
 | Desktop GUI | `scraper-full/pdf_crawler_gui_2.py` | Manual crawl driver; log pane via `_TkLogHandler` |
 | Web dashboard | `ops/dashboard.py` | Flask status page, `/` and `/api/status` |
@@ -124,6 +124,10 @@ The scraper's `_make_session()` factory produces a `requests.Session` with:
 - **Allowed methods**: HEAD and GET only
 - **Adapters**: `HTTPAdapter` mounted on both `http://` and `https://` schemes
 - **Rate limiting**: `_DomainRateLimiter` enforces 2.0s between requests to the same domain, max 3 concurrent suppliers
+- **Proxy / env control** (from the `network` block in `pipeline_config.json`):
+  - `http_proxy` / `https_proxy`: explicit proxy URLs applied per scheme; empty string = no proxy for that scheme.
+  - `trust_env_proxy` (default `false`): the session ignores `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` env vars, so the config file is the single source of truth for egress. Flip to `true` only if IT wants env-var-managed proxying.
+  - `require_proxy` (default `false`): hard fail-closed switch — if `true` and no proxy is configured, `run()` raises before any crawl starts rather than falling back to direct egress (mirrors the `malware_scan_enabled` kill-switch).
 
 ### What is NOT used
 

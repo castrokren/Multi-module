@@ -56,5 +56,6 @@ def mock_pdf_response():
     r = MagicMock()
     r.status_code = 200
     r.headers = {"Content-Type": "application/pdf", "Content-Length": "10240"}
+    r.history = []
     r.iter_content.return_value = [b"%PDF-1.4 mock content" * 100]
     return r
