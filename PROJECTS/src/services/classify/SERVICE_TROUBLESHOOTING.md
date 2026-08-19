@@ -201,8 +201,11 @@ If your watch directory is a network path (`\\research-cifs.nyumc.org\...`):
 **You MUST use a domain account**, not LocalSystem:
 
 ```cmd
-python simple_W_service.py --username "nyumc\castrk05_adm" --password "YourPassword" --startup auto install
+echo "YourPassword" | python simple_W_service.py --username "nyumc\castrk05_adm" --password-stdin --startup auto install
 ```
+
+Supply the password via stdin (`--password-stdin`), not `--password` — a password on the
+command line is visible in the process list (Task Manager, `Get-CimInstance Win32_Process`).
 
 LocalSystem cannot access network drives.
 

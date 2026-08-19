@@ -31,6 +31,14 @@ SUPPORTED_ACTIONS = ['install', 'update', 'remove', 'start', 'stop', 'restart', 
 CONFIG_FILE = 'service_config.json'
 MONITOR_CONFIG_FILE = 'monitor_config.json'
 
+def _redact_cmd(cmd):
+    """Return a copy of cmd with any password value masked for display."""
+    display = list(cmd)
+    for i, tok in enumerate(display):
+        if tok == '--password' and i + 1 < len(display):
+            display[i + 1] = '********'
+    return display
+
 def get_short_path(long_path):
     """Convert a long Windows path to short (8.3) path."""
     try:
@@ -688,11 +696,13 @@ class ServiceGUI(tk.Tk):
 
         # Build options
         opts = []
+        password = ''
         if action in ('install','update'):
             if self.user_var.get().strip():
                 opts += ['--username', self.user_var.get().strip()]
-            if self.pass_var.get().strip():
-                opts += ['--password', self.pass_var.get().strip()]
+            password = self.pass_var.get().strip()
+            if password:
+                opts += ['--password-stdin']
             if self.startup_var.get():
                 opts += ['--startup', self.startup_var.get()]
             if self.interactive_var.get():
@@ -702,14 +712,21 @@ class ServiceGUI(tk.Tk):
 
         def update_log_start():
             self.log_text.delete('1.0', tk.END)
-            self._log_message(f"Running: {' '.join(cmd)}")
+            self._log_message(f"Running: {' '.join(_redact_cmd(cmd))}")
             self._log_message(f"Monitor config saved to: {MONITOR_CONFIG_FILE}")
 
         self.after(0, update_log_start)
         self.after(0, lambda: self.status_var.set(f"Executing {action}..."))
 
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=30)
+            result = subprocess.run(
+                cmd,
+                input=(password + "\n") if password else None,
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=30,
+            )
             self.after(0, lambda: self._log_message(result.stdout))
             self.after(0, lambda: self.status_var.set("Command completed successfully"))
             self.after(0, lambda: messagebox.showinfo("Success", "Command completed successfully. See log for details."))
@@ -727,6 +744,7 @@ class ServiceGUI(tk.Tk):
             self.after(0, lambda: self.status_var.set("Command failed"))
             self.after(0, lambda: messagebox.showerror("Error", f"Unexpected error: {e}"))
         finally:
+            self.pass_var.set('')
             self.after(3000, lambda: self.status_var.set("Ready"))
 
 if __name__ == '__main__':

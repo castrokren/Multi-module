@@ -122,5 +122,15 @@ class FolderMonitorService(win32serviceutil.ServiceFramework):
                 (self._svc_name_, '')
             )
 
+def _resolve_password_from_stdin(argv):
+    """Translate a --password-stdin flag into --password read from stdin."""
+    if '--password-stdin' not in argv:
+        return argv
+    password = sys.stdin.readline().rstrip('\n')
+    argv = list(argv)
+    idx = argv.index('--password-stdin')
+    argv[idx:idx + 1] = ['--password', password]
+    return argv
+
 if __name__ == '__main__':
-    win32serviceutil.HandleCommandLine(FolderMonitorService)
+    win32serviceutil.HandleCommandLine(FolderMonitorService, argv=_resolve_password_from_stdin(sys.argv))

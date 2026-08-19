@@ -31,7 +31,7 @@ echo.
 
 :: Install service with credentials
 echo Installing service with account: %USERNAME%
-python simple_W_service.py --username "%USERNAME%" --password "%PASSWORD%" --startup auto install
+echo %PASSWORD%| python simple_W_service.py --username "%USERNAME%" --password-stdin --startup auto install
 
 if %errorLevel% neq 0 (
     echo.
