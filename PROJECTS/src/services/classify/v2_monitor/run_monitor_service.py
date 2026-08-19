@@ -260,9 +260,9 @@ try:
                 raise
 
 
-    def run_windows_service():
+    def run_windows_service(argv=None):
         """Handle Windows Service commands."""
-        win32serviceutil.HandleCommandLine(CrawlerMonitorService)
+        win32serviceutil.HandleCommandLine(CrawlerMonitorService, argv=argv)
 
     HAS_WINDOWS_SERVICE = True
 
@@ -277,18 +277,38 @@ except ImportError:
         sys.exit(1)
 
 
-if __name__ == '__main__':
-    # Check command line arguments
-    if len(sys.argv) > 1:
-        cmd = sys.argv[1].lower()
+def _resolve_password_from_stdin(argv):
+    """Translate a --password-stdin flag into --password read from stdin."""
+    if '--password-stdin' not in argv:
+        return argv
+    password = sys.stdin.readline().rstrip('\n')
+    argv = list(argv)
+    idx = argv.index('--password-stdin')
+    argv[idx:idx + 1] = ['--password', password]
+    return argv
 
+
+def _find_command(argv):
+    """Return the first recognized service command token in argv."""
+    known = {'install', 'remove', 'start', 'stop', 'restart', 'debug', 'help', '--help', '-h'}
+    for tok in argv[1:]:
+        if tok.lower() in known:
+            return tok.lower()
+    return None
+
+
+if __name__ == '__main__':
+    argv = _resolve_password_from_stdin(sys.argv)
+    cmd = _find_command(argv)
+
+    if cmd:
         # Windows Service commands
         if cmd in ('install', 'remove', 'start', 'stop', 'restart', 'debug'):
             if not HAS_WINDOWS_SERVICE:
-                run_windows_service()
+                run_windows_service(argv=argv)
             else:
                 try:
-                    run_windows_service()
+                    run_windows_service(argv=argv)
                 except Exception as e:
                     print(f"Service command failed: {e}")
                     sys.exit(1)
